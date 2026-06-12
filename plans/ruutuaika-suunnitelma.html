@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="fi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rootaika - Windows-pelikoneiden ruutuajan seuranta</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --text: #1f2933;
+      --muted: #5b6673;
+      --border: #d8dee6;
+      --accent: #0f766e;
+      --accent-soft: #e6f4f1;
+      --warn: #8a5a00;
+      --warn-soft: #fff5d6;
+      --code: #f0f3f7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 48px 24px 72px;
+    }
+
+    header {
+      margin-bottom: 32px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 40px 0 14px;
+      font-size: 1.45rem;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 22px 0 8px;
+      font-size: 1.08rem;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    ul,
+    ol {
+      margin: 0 0 16px 1.25rem;
+      padding: 0;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    code {
+      padding: 0.12rem 0.32rem;
+      border-radius: 4px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #101827;
+      color: #eef4ff;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 22px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf2f7;
+      font-weight: 650;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin: 22px 0 30px;
+    }
+
+    .card {
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+
+    .card strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.95rem;
+      color: var(--accent);
+    }
+
+    .note {
+      padding: 14px 16px;
+      border: 1px solid #f0d98b;
+      border-radius: 8px;
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .section {
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      margin-bottom: 18px;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.86rem;
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="pill">Suunnitelma</p>
+      <h1>rootaika</h1>
+      <p>
+        Tavoitteena on toteuttaa Windows-pelikoneiden ruutuajan seurantaan LAN-verkossa toimiva järjestelmä,
+        jossa Windows-pelikoneilla
+        ajettava headless-client raportoi aktiivisen käytön Go-pohjaiselle HTTP-palvelimelle.
+        Palvelin tallentaa tapahtumat SQLiteen ja tarjoaa web-käyttöliittymän toteuman seurantaan.
+      </p>
+    </header>
+
+    <section class="summary" aria-label="Yhteenveto">
+      <div class="card">
+        <strong>Palvelin</strong>
+        Go HTTP server, SQLite, Docker, web-UI ja client-API.
+      </div>
+      <div class="card">
+        <strong>Windows-client</strong>
+        Go-pohjainen Windows Service ja käyttäjäsessiossa ajettava agentti.
+      </div>
+      <div class="card">
+        <strong>Kohdeympäristö</strong>
+        5-10 Windows-konetta kotiverkossa. Skaalautuminen ei ole päähuoli.
+      </div>
+      <div class="card">
+        <strong>Autentikointi</strong>
+        HTTP Basic Auth: erillinen admin-tunnus ja yhteinen client-tunnus/salasana.
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Nimeäminen ja repon rakenne</h2>
+      <p>
+        Palvelukokonaisuuden nimi on <code>rootaika</code>. Koodi toteutetaan monorepona git-repoon
+        <code>~/dev/rootaika</code>. Repon päätasolla on oma hakemisto kullekin pääkomponentille.
+      </p>
+      <pre><code>rootaika/
+  plans/
+  server/
+  client-windows/</code></pre>
+      <ul>
+        <li><code>server</code> on hyvä nimi Go-pohjaiselle HTTP-palvelimelle, koska monorepon nimi antaa palvelulle jo tuotteen kontekstin.</li>
+        <li><code>windows</code> on liian yleinen nimi client-komponentille: se voi tarkoittaa käyttöjärjestelmää, ikkunointia tai Windows-kohtaista apukoodia.</li>
+        <li><code>client-windows</code> kertoo selvästi, että kyseessä on Windowsille toteutettu client. Jos myöhemmin tulisi muita clienttejä, nimeämistä voi jatkaa samalla kaavalla, esimerkiksi <code>client-linux</code>.</li>
+      </ul>
+      <p>
+        Windows-clientin sisällä voidaan erottaa service ja käyttäjäsessiossa ajettava agentti omiin
+        alihakemistoihinsa, esimerkiksi <code>client-windows/cmd/rootaika-service</code> ja
+        <code>client-windows/cmd/rootaika-agent</code>.
+      </p>
+    </section>
+
+    <section class="section">
+      <h2>Rajaukset ja lähtökohdat</h2>
+      <ul>
+        <li>Kaikki laitteet ovat samassa LAN-verkossa.</li>
+        <li>Palvelin käyttää LANissa HTTP-yhteyttä ilman TLS/HTTPS-suojausta.</li>
+        <li>Ruutuaika seurataan ensisijaisesti laitekohtaisesti.</li>
+        <li>Jokainen laite voidaan liittää käyttäjään. Tulevaisuudessa saman käyttäjän useat laitteet voidaan laskea yhteen.</li>
+        <li>Alkuvaiheessa tuetaan yhtä aktiivista kirjautunutta Windows-käyttäjää per kone.</li>
+        <li>Ruutuaika tarkoittaa aikaa, jolloin kone ei ole idle-tilassa.</li>
+        <li>Idle-tilaan siirrytään oletuksena, jos hiirtä tai näppäimistöä ei ole käytetty 60 sekuntiin.</li>
+        <li>Idle-raja on konfiguroitava ja client cachettaa viimeisimmän configin paikallisesti.</li>
+        <li>Prosessin nimi riittää ensimmäiseksi aktiivisen ohjelman tunnisteeksi.</li>
+        <li>Ikkunaotsikoita, selainosoitteita tai muuta ylimääräistä yksityistä tietoa ei kerätä.</li>
+        <li>Kaikki ajat tallennetaan UTC-aikaleimoina. Esityskerroksessa voidaan käyttää Helsinki-aikavyöhykettä.</li>
+        <li>Kaikki raakatapahtumat säilytetään toistaiseksi pysyvästi ilman automaattista vanhenemista.</li>
+      </ul>
+      <p class="note">
+        Tunnistettu rajoite: videon katselu voi näyttää idle-ajalta, jos hiirtä tai näppäimistöä ei käytetä.
+        Tätä ei ratkaista ensimmäisessä versiossa.
+      </p>
+    </section>
+
+    <section class="section">
+      <h2>Komponentit</h2>
+
+      <h3>1. Go HTTP Server</h3>
+      <ul>
+        <li>Vastaanottaa Windows-clienttien tapahtumabatcheja.</li>
+        <li>Tarjoaa client-configin ja komennot, kuten lock/unlock.</li>
+        <li>Tallentaa datan SQLite-tietokantaan.</li>
+        <li>Laskee raportit tapahtumista palvelinpäässä.</li>
+        <li>Tarjoaa web-käyttöliittymän toteuman seurantaan ja asetusten muokkaamiseen.</li>
+        <li>Ajetaan Linux-palvelimella Docker-kontissa.</li>
+      </ul>
+
+      <h3>2. Windows Service</h3>
+      <ul>
+        <li>Käynnistyy Windowsin mukana.</li>
+        <li>Säilyttää client UUID:n, Basic Auth -client-tunnuksen ja viimeisimmän configin.</li>
+        <li>Puskuroi eventit paikalliseen SQLite-tietokantaan.</li>
+        <li>Lähettää eventit palvelimelle ajoittain batcheina.</li>
+        <li>Pollaa palvelimelta configin ja pending-komennot.</li>
+        <li>Valvoo käyttäjäsession agenttia ja käynnistää sen uudelleen, jos agentti sammuu.</li>
+        <li>Ajetaan adminin asentamana servicena, jota ei-admin-käyttäjä ei voi normaalisti pysäyttää.</li>
+      </ul>
+
+      <h3>3. Windows User Session Agent</h3>
+      <ul>
+        <li>Ajetaan kirjautuneen käyttäjän sessiossa.</li>
+        <li>Ei näy taskbarissa eikä alt-tab-valikossa.</li>
+        <li>Lukee idle-ajan Windows API:n <code>GetLastInputInfo</code>-kutsulla.</li>
+        <li>Lukee aktiivisen ikkunan <code>GetForegroundWindow</code>-kutsulla.</li>
+        <li>Selvittää prosessin PID:n <code>GetWindowThreadProcessId</code>-kutsulla.</li>
+        <li>Selvittää aktiivisen prosessin nimen PID:n perusteella.</li>
+        <li>Näyttää lukitustilassa mustan fullscreen topmost -ikkunan.</li>
+        <li>Jos käyttäjä saa agenttiprosessin sammutettua, Windows Service havaitsee tilanteen ja käynnistää agentin uudelleen.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>Autentikointi ja oikeudet</h2>
+      <p>
+        Järjestelmä käyttää HTTP Basic Authia kahdella roolilla:
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Rooli</th>
+            <th>Käyttö</th>
+            <th>Oikeudet</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>admin</code></td>
+            <td>Adminin web-kirjautuminen ja ylläpitotoiminnot.</td>
+            <td>Voi muuttaa asetuksia, käyttäjiä, laitteita, kategorioita ja lock/unlock-komentoja.</td>
+          </tr>
+          <tr>
+            <td><code>client</code></td>
+            <td>Windows-clienttien raportointi ja web-UI:n katselu.</td>
+            <td>Voi lähettää tapahtumia, hakea client-configin, hakea komentoja ja katsella web-käyttöliittymää.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Jokainen client generoi itselleen pysyvän UUID-tunnisteen. Palvelin yksilöi laitteen tämän UUID:n
+        perusteella ja hyväksyy tapahtumia clientiltä, joka läpäisee jaetun client Basic Auth -tunnuksen.
+        Jos palvelin näkee uuden UUID:n ensimmäistä kertaa, se luo laitteen automaattisesti tilaan
+        <code>unassigned</code>. Admin nimeää laitteen ja liittää sen käyttäjään web-UI:ssa.
+      </p>
+      <p class="note">
+        Turvarajoite: yhteinen client-salasana ei estä clienttiä A raportoimasta clienttinä B, jos B:n UUID
+        tiedetään. Lisäksi HTTP Basic Auth -tunnukset kulkevat LANissa ilman TLS-suojausta ja salasanat
+        tallennetaan SQLiteen selväkielisinä. Nämä rajoitteet hyväksytään ensimmäisessä versiossa käsin
+        konfiguroinnin yksinkertaistamiseksi.
+      </p>
+      <ul>
+        <li>Admin-toiminnot vaativat aina admin-tunnuksen.</li>
+        <li>Client-tunnuksella saa katsella koko web-UI:ta read-only-tilassa, mutta ei muuttaa asetuksia.</li>
+        <li>Clientin paikallinen config suojataan tiedosto-oikeuksilla niin, että ei-admin-käyttäjä ei voi muokata sitä.</li>
+        <li>Lapsen Windows-käyttäjätili pidetään ei-admin-tilinä.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>Clientin tapahtumamalli</h2>
+      <p>
+        Client lähettää aikaleimattuja havaintoja aktiivisuuden tilasta. Lopullinen käyttöajan laskenta
+        tehdään palvelimella vertaamalla saman laitteen peräkkäisiä havaintoja. Jokaisella tapahtumalla
+        on oma UUID, jotta sama batch voidaan lähettää uudelleen ilman duplikaatteja.
+      </p>
+      <ul>
+        <li>Tapahtumatyyppi on <code>activity_observed</code>.</li>
+        <li><code>state</code> kertoo havaitun tilan: <code>active</code>, <code>idle</code> tai <code>locked</code>.</li>
+        <li><code>process_name</code> asetetaan vain, kun <code>state</code> on <code>active</code>.</li>
+        <li><code>occurred_at</code> on UTC-aikaleima hetkelle, josta havaittu tila pätee laskennassa.</li>
+      </ul>
+      <pre><code>{
+  "client_id": "2f0c70e7-70e5-4a1a-b9c4-5dd92dd9cf9b",
+  "events": [
+    {
+      "event_id": "4c516bf0-a6c1-4d80-a227-f8022c5c8f3c",
+      "type": "activity_observed",
+      "occurred_at": "2026-06-11T12:00:00Z",
+      "state": "active",
+      "process_name": "steam.exe",
+      "sequence": 12345
+    }
+  ]
+}</code></pre>
+    </section>
+
+    <section class="section">
+      <h2>Raportointirytmi</h2>
+      <ul>
+        <li>Idle-raja: oletuksena 60 sekuntia, palvelimelta konfiguroitava.</li>
+        <li>Foreground-prosessin tarkistus: esimerkiksi 1-5 sekunnin välein.</li>
+        <li><code>activity_observed</code> syntyy säännöllisesti sekä heti, kun tila tai aktiivinen prosessi vaihtuu.</li>
+        <li>Eventtien lähetys: batchinä esimerkiksi 1 minuutin välein.</li>
+        <li>Configin ja komentojen polling: esimerkiksi 30 sekunnin välein.</li>
+        <li>Jos serveri ei vastaa, eventit jäävät paikalliseen SQLite-puskuriin ja lähetetään myöhemmin.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>Server API -luonnos</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Endpoint</th>
+            <th>Rooli</th>
+            <th>Kuvaus</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>POST /api/v1/events/batch</code></td>
+            <td>client</td>
+            <td>Client lähettää tapahtumabatcheja. Tuntematon <code>client_id</code> luo uuden laitteen tilaan <code>unassigned</code>.</td>
+          </tr>
+          <tr>
+            <td><code>GET /api/v1/client/config?client_id=...</code></td>
+            <td>client</td>
+            <td>Client hakee idle-rajan, upload-välin, polling-välin ja kategoriasäännöt.</td>
+          </tr>
+          <tr>
+            <td><code>GET /api/v1/client/commands?client_id=...</code></td>
+            <td>client</td>
+            <td>Client hakee pending-komennot, kuten lock tai unlock.</td>
+          </tr>
+          <tr>
+            <td><code>POST /api/v1/client/commands/{command_id}/ack</code></td>
+            <td>client</td>
+            <td>Client kuittaa komennon käsitellyksi.</td>
+          </tr>
+          <tr>
+            <td><code>GET /</code></td>
+            <td>client tai admin</td>
+            <td>Web-UI:n katselunäkymä.</td>
+          </tr>
+          <tr>
+            <td><code>POST /admin/devices/{id}/lock</code></td>
+            <td>admin</td>
+            <td>Luo lock-komennon valitulle laitteelle.</td>
+          </tr>
+          <tr>
+            <td><code>POST /admin/devices/{id}/unlock</code></td>
+            <td>admin</td>
+            <td>Luo unlock-komennon valitulle laitteelle.</td>
+          </tr>
+          <tr>
+            <td><code>POST /admin/settings</code></td>
+            <td>admin</td>
+            <td>Muokkaa järjestelmäasetuksia.</td>
+          </tr>
+          <tr>
+            <td><code>POST /admin/categories</code></td>
+            <td>admin</td>
+            <td>Muokkaa ohjelmakategorioita.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>SQLite-tietomalli</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Taulu</th>
+            <th>Keskeiset kentät</th>
+            <th>Tarkoitus</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>users</code></td>
+            <td><code>id</code>, <code>name</code>, <code>created_at_utc</code></td>
+            <td>Käyttäjät, joihin laitteita voidaan liittää.</td>
+          </tr>
+          <tr>
+            <td><code>devices</code></td>
+            <td><code>id</code>, <code>client_uuid</code>, <code>display_name</code>, <code>user_id</code>, <code>registration_status</code>, <code>created_at_utc</code>, <code>last_seen_at_utc</code></td>
+            <td>Windows-koneet ja niiden omistaja-/käyttäjäliitos. Uudet laitteet syntyvät tilaan <code>unassigned</code>.</td>
+          </tr>
+          <tr>
+            <td><code>events</code></td>
+            <td><code>id</code>, <code>event_uuid</code>, <code>device_id</code>, <code>type</code>, <code>state</code>, <code>occurred_at_utc</code>, <code>process_name</code>, <code>sequence</code></td>
+            <td>Clienttien lähettämät aikaleimatut <code>activity_observed</code>-havainnot.</td>
+          </tr>
+          <tr>
+            <td><code>device_config</code></td>
+            <td><code>device_id</code>, <code>idle_threshold_seconds</code>, <code>upload_interval_seconds</code>, <code>poll_interval_seconds</code></td>
+            <td>Laitekohtainen client-konfiguraatio.</td>
+          </tr>
+          <tr>
+            <td><code>commands</code></td>
+            <td><code>id</code>, <code>device_id</code>, <code>type</code>, <code>status</code>, <code>created_at_utc</code>, <code>ack_at_utc</code></td>
+            <td>Palvelimelta clientille lähtevät komennot.</td>
+          </tr>
+          <tr>
+            <td><code>program_categories</code></td>
+            <td><code>id</code>, <code>match_type</code>, <code>pattern</code>, <code>category</code>, <code>created_at_utc</code></td>
+            <td>Kevyt laajennuspiste ohjelmien kategorisointiin.</td>
+          </tr>
+          <tr>
+            <td><code>settings</code></td>
+            <td><code>key</code>, <code>value</code>, <code>updated_at_utc</code></td>
+            <td>Yleiset asetukset, joita admin voi muokata web-UI:ssa.</td>
+          </tr>
+          <tr>
+            <td><code>auth_credentials</code></td>
+            <td><code>role</code>, <code>username</code>, <code>password_plaintext</code>, <code>updated_at_utc</code></td>
+            <td>HTTP Basic Auth -tunnukset admin- ja client-rooleille. MVP:ssä salasanat tallennetaan selväkielisinä.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Raportit voidaan laskea aluksi suoraan <code>events</code>-taulusta. Jos laskenta hidastuu tai
+        kyselyistä tulee monimutkaisia, lisätään myöhemmin aggregaattitaulu kuten <code>usage_segments</code>
+        tai <code>daily_usage</code>. Raakatapahtumille ei tehdä automaattista poistopolitiikkaa ensimmäisessä
+        versiossa.
+      </p>
+    </section>
+
+    <section class="section">
+      <h2>Käyttöajan laskenta palvelimella</h2>
+      <ul>
+        <li>Palvelin järjestää laitteen <code>activity_observed</code>-havainnot <code>occurred_at_utc</code>-ajan ja <code>sequence</code>-arvon mukaan.</li>
+        <li>Jos edellinen havainto on <code>state = active</code>, aika seuraavaan havaintoon lasketaan edellisen havainnon <code>process_name</code>-ohjelmalle.</li>
+        <li>Jos edellinen havainto on <code>state = idle</code> tai <code>state = locked</code>, aikaa ei lasketa ruutuajaksi.</li>
+        <li>Kun aktiivinen prosessi vaihtuu, client lähettää uuden <code>activity_observed</code>-havainnon uudella <code>process_name</code>-arvolla.</li>
+        <li>Pitkä havaintokatkos katkaistaan konfiguroitavalla <code>max_countable_gap_seconds</code>-rajalla, jotta sleep, sammutus tai verkko-ongelma ei tuota virheellistä käyttöaikaa.</li>
+        <li>Viimeistä avointa havaintoa ei tarvitse tallentaa palvelimella tilana. Raporttikysely voi laskea sen mukaan vain, jos havainto on riittävän tuore.</li>
+      </ul>
+      <p>
+        Tämän mallin etu on, että palvelin ei tarvitse erillistä start/stop-tilakonetta. Se koostaa käyttöajan
+        aikaleimatuista havainnoista, ja laskentalogiikkaa voidaan korjata palvelinpäässä ilman client-päivitystä.
+      </p>
+    </section>
+
+    <section class="section">
+      <h2>Web-käyttöliittymän MVP</h2>
+      <ul>
+        <li>Tänään per laite: aktiivinen kokonaisaika, ohjelmakohtainen erittely, viimeksi nähty ja lukitustila.</li>
+        <li>Viikkonäkymä: päiväkohtaiset summat per laite.</li>
+        <li>Kuukausinäkymä: päiväkohtainen tai viikkokohtainen yhteenveto.</li>
+        <li>Laitteet: nimi, UUID, käyttäjäliitos ja viimeisin yhteys.</li>
+        <li>Käyttäjät: käyttäjien luonti ja nimeäminen.</li>
+        <li>Asetukset: idle-raja, upload-väli ja polling-väli.</li>
+        <li>Kategoriat: prosessinimipohjaiset kategoriat, esim. pelit, selain ja muu.</li>
+        <li>Admin-toiminnot: lock/unlock, asetusten muokkaus ja laite-/käyttäjähallinta.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>Lukitustoiminto</h2>
+      <ul>
+        <li>Admin luo web-UI:sta lock- tai unlock-komennon tietylle laitteelle.</li>
+        <li>Client hakee komennon pollingilla.</li>
+        <li>Windows Service välittää lukitustilan käyttäjäsession agentille.</li>
+        <li>Agentti näyttää mustan fullscreen topmost -ikkunan.</li>
+        <li>Agentti palauttaa ikkunan etualalle, jos fokus vaihtuu.</li>
+        <li>Lukitus puretaan vain palvelimelta tulevalla unlock-komennolla.</li>
+      </ul>
+      <p class="note">
+        Tämä on MVP-tason lukitus, ei Windowsin oma lock screen. Ei-admin-käyttäjälle se on kuitenkin
+        käytännössä riittävä ensimmäiseksi toteutukseksi, kun service ja config on suojattu oikeuksilla
+        ja service käynnistää agentin uudelleen tarvittaessa.
+      </p>
+    </section>
+
+    <section class="section">
+      <h2>Clientin sammuttamisen vaikeuttaminen</h2>
+      <ul>
+        <li>Varsinainen valvova komponentti on Windows Service, ei käyttäjäsessiossa ajettava overlay-agentti.</li>
+        <li>Service asennetaan admin-oikeuksilla ja ajetaan esimerkiksi <code>LocalSystem</code>-tilillä tai erillisellä service-tilillä.</li>
+        <li>Ei-admin-käyttäjä ei saa oikeutta pysäyttää, poistaa tai muuttaa serviceä.</li>
+        <li>Windowsin service recovery asetetaan käynnistämään service uudelleen, jos se kaatuu.</li>
+        <li>Service tarkistaa säännöllisesti, että käyttäjäsession agentti on käynnissä oikeassa sessiossa.</li>
+        <li>Jos agentti puuttuu tai se on sammutettu, service käynnistää sen uudelleen.</li>
+        <li>Jos laite on lukitussa tilassa, uudelleenkäynnistetty agentti avaa mustan topmost-overlayn heti uudelleen.</li>
+        <li>Clientin config, tunnukset ja paikallinen SQLite-puskuri suojataan ACL-oikeuksilla adminille ja service-käyttäjälle.</li>
+      </ul>
+      <p class="note">
+        Prosessia ei piiloteta Task Managerista. Kovennus perustuu Windowsin normaaleihin oikeuksiin,
+        serviceen, watchdog-valvontaan ja siihen, että lapsen käyttäjätili ei ole local admin.
+      </p>
+    </section>
+
+    <section class="section">
+      <h2>Windows-toteutuksen huomioita</h2>
+      <ul>
+        <li>Windows-client voidaan toteuttaa Go:lla käyttäen <code>golang.org/x/sys/windows</code>-pakettia.</li>
+        <li>Go:lla onnistuvat idle-tunnistus, foreground window -tunnistus, prosessinimen selvitys, Windows Service, HTTP-client ja SQLite-puskurointi.</li>
+        <li>C# olisi luonteva erityisesti Windows UI- ja session-integraatioihin, mutta Go on realistinen valinta tämän rajauksen perusteella.</li>
+        <li>Client asennetaan MVP:ssä manuaalisesti ajettavalla PowerShell-asennusskriptillä admin-oikeuksilla.</li>
+        <li>Prosessia ei yritetä piilottaa Task Managerista. Sellaiset keinot menevät haittaohjelma-/rootkit-tekniikoiden puolelle.</li>
+        <li>Sen sijaan lapsen tili pidetään ei-admin-tilinä, service asennetaan admin-oikeuksilla ja service recovery käynnistää servicen uudelleen kaatumisen jälkeen.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>Toteutusvaiheet</h2>
+      <ol>
+        <li>Go HTTP Serverin runko: reititys, SQLite-yhteys, migraatiot, Basic Auth, HTTP ilman TLS:ää ja Dockerfile.</li>
+        <li>Tietomalli: users, devices, events, config, commands, categories ja settings.</li>
+        <li>Client API: batch events, config, commands ja command ack.</li>
+        <li>Web-UI:n katselunäkymät: tänään, viikko, kuukausi ja ohjelmakohtainen erittely.</li>
+        <li>Admin-UI: asetukset, käyttäjät, laitteet, kategoriat ja lock/unlock.</li>
+        <li>Windows Service: UUID, config-cache, local SQLite queue, upload worker ja command polling.</li>
+        <li>User Session Agent: idle-tunnistus, foreground process -tunnistus, eventtien välitys servicelle ja musta overlay lukitustilassa.</li>
+        <li>Windows-asennus: manuaalisesti ajettava PowerShell-skripti, joka asentaa servicen ja suojaa configin ACL-oikeuksilla.</li>
+        <li>Server-laskenta: eventeistä käyttöjaksot ja raportit.</li>
+        <li>Watchdog: service valvoo session-agenttia ja käynnistää sen uudelleen, jos käyttäjä sammuttaa sen.</li>
+        <li>Lukitustoiminto: musta topmost fullscreen overlay ja unlock palvelimelta.</li>
+        <li>Kovennukset: tiedosto-oikeudet, service recovery, retry/backoff, lokitus ja virhetilanteiden käsittely.</li>
+      </ol>
+    </section>
+
+    <section class="section">
+      <h2>MVP-tavoite</h2>
+      <p>
+        Ensimmäisen toimivan version tavoite on: selaimesta näkee jokaisen Windows-koneen tämän päivän
+        aktiivisen käytön, ohjelmakohtaiset ajat, viikko- ja kuukausiyhteenvedot sekä laitteen lukitustilan.
+        Admin voi muuttaa asetuksia ja lähettää lock/unlock-komennon. Client toimii offline-tilanteessa
+        puskuroimalla eventit paikallisesti ja lähettämällä ne myöhemmin.
+      </p>
+    </section>
+  </main>
+</body>
+</html>
