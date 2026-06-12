@@ -1,0 +1,49 @@
+package rootaika
+
+import (
+	"net/http"
+	"time"
+
+	_ "time/tzdata"
+)
+
+type App struct {
+	store    *Store
+	now      func() time.Time
+	location *time.Location
+}
+
+func NewApp(store *Store) *App {
+	location, err := time.LoadLocation("Europe/Helsinki")
+	if err != nil {
+		location = time.Local
+	}
+	return &App{
+		store:    store,
+		now:      func() time.Time { return time.Now().UTC() },
+		location: location,
+	}
+}
+
+func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.URL.Path == "/" && r.Method == http.MethodGet:
+		a.handleDashboard(w, r)
+	case r.URL.Path == "/api/v1/events/batch":
+		a.handleEventsBatch(w, r)
+	case r.URL.Path == "/api/v1/client/config":
+		a.handleClientConfig(w, r)
+	case r.URL.Path == "/api/v1/client/commands":
+		a.handleClientCommands(w, r)
+	case isCommandAckPath(r.URL.Path):
+		a.handleCommandAck(w, r)
+	case stringsHasPrefix(r.URL.Path, "/admin/"):
+		a.handleAdmin(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func stringsHasPrefix(value, prefix string) bool {
+	return len(value) >= len(prefix) && value[:len(prefix)] == prefix
+}
