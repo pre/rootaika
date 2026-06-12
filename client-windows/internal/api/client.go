@@ -14,11 +14,21 @@ import (
 	"rootaika/client-windows/internal/model"
 )
 
+const (
+	defaultMaxAttempts = 4
+	defaultBaseBackoff = 500 * time.Millisecond
+	defaultMaxBackoff  = 5 * time.Second
+)
+
 type Client struct {
-	baseURL    string
-	username   string
-	password   string
-	httpClient *http.Client
+	baseURL     string
+	username    string
+	password    string
+	httpClient  *http.Client
+	maxAttempts int
+	baseBackoff time.Duration
+	maxBackoff  time.Duration
+	sleep       func(ctx context.Context, d time.Duration) error
 }
 
 func New(baseURL, username, password string) *Client {
@@ -29,7 +39,23 @@ func New(baseURL, username, password string) *Client {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		maxAttempts: defaultMaxAttempts,
+		baseBackoff: defaultBaseBackoff,
+		maxBackoff:  defaultMaxBackoff,
+		sleep:       sleepCtx,
 	}
+}
+
+// WithRetry overrides the retry policy. A non-positive attempts disables
+// retrying (a single attempt is always made). Exposed for tests.
+func (c *Client) WithRetry(attempts int, base, max time.Duration) *Client {
+	if attempts < 1 {
+		attempts = 1
+	}
+	c.maxAttempts = attempts
+	c.baseBackoff = base
+	c.maxBackoff = max
+	return c
 }
 
 func (c *Client) WithHTTPClient(httpClient *http.Client) *Client {
@@ -95,40 +121,106 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		endpoint.RawQuery = query.Encode()
 	}
 
-	var body io.Reader
+	var payloadBytes []byte
 	if payload != nil {
 		var buf bytes.Buffer
 		if err := json.NewEncoder(&buf).Encode(payload); err != nil {
 			return nil, err
 		}
-		body = &buf
+		payloadBytes = buf.Bytes()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
+	attempts := c.maxAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			if err := c.sleep(ctx, c.backoff(attempt)); err != nil {
+				return nil, err
+			}
+		}
+
+		body, retryable, err := c.attempt(ctx, method, path, endpoint.String(), payloadBytes, payload != nil)
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+		if !retryable {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("%s %s failed after %d attempts: %w", method, path, attempts, lastErr)
+}
+
+// attempt performs a single request. The returned bool reports whether the
+// error is transient and worth retrying (network errors, 5xx, 429). 4xx and
+// decode errors are terminal.
+func (c *Client) attempt(ctx context.Context, method, path, endpoint string, payloadBytes []byte, hasPayload bool) ([]byte, bool, error) {
+	var body io.Reader
+	if hasPayload {
+		body = bytes.NewReader(payloadBytes)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	req.SetBasicAuth(c.username, c.password)
-	if payload != nil {
+	if hasPayload {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		// Context cancellation is terminal; other transport errors are transient.
+		if ctx.Err() != nil {
+			return nil, false, err
+		}
+		return nil, true, err
 	}
 	defer resp.Body.Close()
 
 	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		retryable := resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests
 		if readErr != nil {
-			return nil, fmt.Errorf("%s %s failed with %s", method, path, resp.Status)
+			return nil, retryable, fmt.Errorf("%s %s failed with %s", method, path, resp.Status)
 		}
-		return nil, fmt.Errorf("%s %s failed with %s: %s", method, path, resp.Status, strings.TrimSpace(string(responseBody)))
+		return nil, retryable, fmt.Errorf("%s %s failed with %s: %s", method, path, resp.Status, strings.TrimSpace(string(responseBody)))
 	}
 	if readErr != nil {
-		return nil, readErr
+		return nil, true, readErr
 	}
-	return responseBody, nil
+	return responseBody, false, nil
+}
+
+// backoff returns the delay before the given attempt (1-based for delays),
+// doubling from baseBackoff and capped at maxBackoff.
+func (c *Client) backoff(attempt int) time.Duration {
+	if c.baseBackoff <= 0 {
+		return 0
+	}
+	delay := c.baseBackoff << (attempt - 1)
+	if c.maxBackoff > 0 && delay > c.maxBackoff {
+		delay = c.maxBackoff
+	}
+	return delay
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

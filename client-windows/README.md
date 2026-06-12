@@ -49,22 +49,47 @@ go build .\cmd\rootaika-service
 go build .\cmd\rootaika-agent
 ```
 
-## Käyttö MVP:ssä
+## Asennus PowerShell-skriptillä
 
-1. Käännä `rootaika-service.exe` ja `rootaika-agent.exe` samaan hakemistoon.
-2. Luo tai käynnistä kerran config, lisää `client_password` vastaamaan serverin client Basic Auth -salasanaa.
-3. Aja service admin-oikeuksilla. Service avaa vain localhostiin sidotun agentti-endpointin ja puskuroi eventit SQLiteen.
-4. Agentti voidaan käynnistää manuaalisesti käyttäjäsessiossa; service yrittää myös käynnistää samasta hakemistosta löytyvän `rootaika-agent.exe`-prosessin.
+Hakemistossa `scripts/` on asennusautomaatio. Aja kaikki adminina (paitsi build).
 
-Windows Service -asennuksen luonnos:
+1. Käännä binäärit:
 
 ```powershell
-sc.exe create rootaika-service binPath= "C:\Program Files\rootaika\rootaika-service.exe -config C:\ProgramData\rootaika\client.json" start= auto
-sc.exe failure rootaika-service reset= 60 actions= restart/5000/restart/5000/restart/5000
-sc.exe start rootaika-service
+.\scripts\build.ps1
 ```
 
-Service-agent-session integraatio on MVP-tasoinen: LocalSystem-servicen käynnistämä agentti ei vielä tee varsinaista aktiivisen käyttäjäsession prosessinluontia. Käytännön ensimmäisessä asennuksessa agentti kannattaa käynnistää kirjautumisen yhteydessä, ja service toimii watchdogina niissä ympäristöissä, joissa child-prosessi syntyy oikeaan sessioon.
+   Tämä tuottaa `dist\rootaika-service.exe` ja `dist\rootaika-agent.exe`. Agentti linkataan `-H=windowsgui`-lipulla, joten sillä ei ole konsoli-ikkunaa oletuksena. Debug-tila avaa konsolin ajonaikaisesti.
+
+2. Asenna (avaa PowerShell adminina):
+
+```powershell
+.\scripts\install.ps1 -ServerUrl http://192.168.1.10:8080 -ClientPassword vaihda-tama
+```
+
+   Skripti:
+   - kopioi binäärit hakemistoon `C:\Program Files\rootaika`,
+   - kirjoittaa configin polkuun `C:\ProgramData\rootaika\client.json` (server-URL ja client-salasana mukana),
+   - rekisteröi `rootaika-service`-servicen auto-startilla ja crash recoveryllä (`restart/5000` kolmesti),
+   - rekisteröi agentin käynnistymään käyttäjän kirjautuessa (HKLM `Run`),
+   - käynnistää servicen ja agentin heti.
+
+3. Poista asennus:
+
+```powershell
+.\scripts\uninstall.ps1          # poistaa servicen ja autostartin
+.\scripts\uninstall.ps1 -Purge   # poistaa myös binäärit ja configin/puskurin
+```
+
+Service ajetaan LocalSystem-tilillä ja avaa vain localhostiin sidotun agentti-endpointin. Agentti ajetaan käyttäjäsessiossa (service toimii watchdogina ja yrittää käynnistää agentin uudelleen, jos se sammuu).
+
+### Verkon katkokset ja serverin uudelleenkäynnistys
+
+Client kestää lyhyet verkkokatkokset ja serverin uudelleenkäynnistykset:
+
+- Eventit puskuroidaan paikalliseen SQLite-tiedostoon (`rootaika-client.db`), ja merkitään lähetetyiksi vasta onnistuneen lähetyksen jälkeen. Lähettämättömät eventit jäävät jonoon, kunnes server vastaa.
+- HTTP-kutsut (event-lähetys, config- ja komento-polling) yrittävät uudelleen exponentiaalisella backoffilla (oletuksena 4 yritystä, 0,5 s → 5 s) transienteissa virheissä: verkkovirheet, 5xx ja 429. 4xx-virheitä ei yritetä uudelleen.
+- Tämä silloittaa serverin uudelleenkäynnistyksen sekunneissa sen sijaan, että odotettaisiin seuraavaa upload-sykliä.
 
 ## Server API
 

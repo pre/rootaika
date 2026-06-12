@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -92,6 +93,97 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 	}
 	if !acked {
 		t.Fatalf("ack endpoint was not called")
+	}
+}
+
+func testClientNoSleep(transport http.RoundTripper) *Client {
+	client := New("http://rootaika.test", "client", "secret").WithHTTPClient(&http.Client{Transport: transport})
+	client.sleep = func(context.Context, time.Duration) error { return nil }
+	return client
+}
+
+func TestRetriesOnServerErrorThenSucceeds(t *testing.T) {
+	calls := 0
+	client := testClientNoSleep(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		if calls < 3 {
+			return testResponse(http.StatusServiceUnavailable, "down"), nil
+		}
+		return testResponse(http.StatusOK, `{"commands":[]}`), nil
+	}))
+
+	if _, err := client.FetchCommands(context.Background(), "client-1"); err != nil {
+		t.Fatalf("FetchCommands: %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("expected 3 attempts, got %d", calls)
+	}
+}
+
+func TestDoesNotRetryClientError(t *testing.T) {
+	calls := 0
+	client := testClientNoSleep(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return testResponse(http.StatusBadRequest, "nope"), nil
+	}))
+
+	if err := client.PostEvents(context.Background(), model.EventBatch{ClientID: "c", Events: []model.Event{{State: model.StateIdle}}}); err == nil {
+		t.Fatalf("expected error on 400")
+	}
+	if calls != 1 {
+		t.Fatalf("expected 1 attempt for 4xx, got %d", calls)
+	}
+}
+
+func TestRetriesOnTransportErrorAndGivesUp(t *testing.T) {
+	calls := 0
+	client := testClientNoSleep(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("connection refused")
+	}))
+	client.WithRetry(3, time.Millisecond, time.Millisecond)
+	client.sleep = func(context.Context, time.Duration) error { return nil }
+
+	if _, err := client.FetchCommands(context.Background(), "client-1"); err == nil {
+		t.Fatalf("expected error after exhausting retries")
+	}
+	if calls != 3 {
+		t.Fatalf("expected 3 attempts, got %d", calls)
+	}
+}
+
+func TestStopsRetryingWhenContextCancelled(t *testing.T) {
+	calls := 0
+	client := testClientNoSleep(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return nil, r.Context().Err()
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := client.FetchCommands(ctx, "client-1"); err == nil {
+		t.Fatalf("expected error on cancelled context")
+	}
+	if calls != 1 {
+		t.Fatalf("cancelled context should not retry, got %d attempts", calls)
+	}
+}
+
+func TestBackoffDoublesAndCaps(t *testing.T) {
+	client := New("http://x", "u", "p").WithRetry(5, 100*time.Millisecond, 250*time.Millisecond)
+	cases := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{1, 100 * time.Millisecond},
+		{2, 200 * time.Millisecond},
+		{3, 250 * time.Millisecond},
+		{4, 250 * time.Millisecond},
+	}
+	for _, tc := range cases {
+		if got := client.backoff(tc.attempt); got != tc.want {
+			t.Fatalf("backoff(%d) = %v, want %v", tc.attempt, got, tc.want)
+		}
 	}
 }
 

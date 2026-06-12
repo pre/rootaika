@@ -235,20 +235,20 @@
           <tr>
             <td>Agentin näkyvyys</td>
             <td>Agentti ei näy taskbarissa eikä alt-tabissa.</td>
-            <td>Konsoli-ikkuna piilotetaan oletuksena. Palvelinpäästä asetettava <code>debug_mode</code> tuo konsolin näkyviin devausta varten.</td>
-            <td><span class="status status-progress">työn alla</span></td>
+            <td>Konsoli-ikkuna piilotetaan oletuksena. Palvelinpäästä asetettava <code>debug_mode</code> tuo konsolin näkyviin devausta varten. Todennettu Windowsilla.</td>
+            <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>
             <td>Tila-muutoseventti</td>
             <td>Havainto syntyy heti, kun tila tai aktiivinen prosessi vaihtuu, sekä säännöllisin välein.</td>
             <td>Agentti vertaa edelliseen havaintoon ja lähettää heti muutoshetkellä, muutoin heartbeat-välein.</td>
-            <td><span class="status status-progress">työn alla</span></td>
+            <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>
             <td>Viikko- ja kuukausinäkymä</td>
             <td>Web-UI:ssa päiväkohtaiset summat per laite viikko- ja kuukausitasolla.</td>
-            <td>Toteutetaan palvelimelle omat näkymät päiväkohtaisille summille.</td>
-            <td><span class="status status-progress">työn alla</span></td>
+            <td>Palvelimella omat näkymät <code>/week</code> ja <code>/month</code> päiväkohtaisille summille.</td>
+            <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>
             <td>Service ja agentti -kommunikaatio</td>
@@ -271,8 +271,20 @@
           <tr>
             <td>Testikattavuus</td>
             <td>Jokainen koodiluokka ja funktio on testattava.</td>
-            <td>Lisätään kattavat testit. Windows-spesifit Win32-syscall-kääreet eivät aja Linux-CI:ssä, joten ne katetaan rakenteellisesti eristämällä logiikka testattaviin funktioihin.</td>
-            <td><span class="status status-progress">työn alla</span></td>
+            <td>Kattavat testit lisätty. Windows-spesifit Win32-syscall-kääreet eivät aja Linux-CI:ssä, joten ne on katettu rakenteellisesti eristämällä logiikka testattaviin funktioihin ja todennettu ajamalla client oikealla Windowsilla.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
+            <td>Windows-asennus (vaihe 8)</td>
+            <td>Manuaalisesti ajettava PowerShell-asennusskripti, joka asentaa servicen.</td>
+            <td><code>scripts/build.ps1</code>, <code>install.ps1</code> ja <code>uninstall.ps1</code>: service auto-startilla ja crash recoveryllä, agentti käynnistyy logoniin HKLM Run -avaimella. ACL-kovennusta ei toteuteta tässä versiossa.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
+            <td>Verkon katkokset ja retry</td>
+            <td>Jos serveri ei vastaa, eventit jäävät paikalliseen puskuriin ja lähetetään myöhemmin.</td>
+            <td>Eventit puskuroidaan SQLiteen. HTTP-kutsuissa exponentiaalinen backoff (4 yritystä, 0,5 s → 5 s) transienteissa virheissä (verkkovirhe, 5xx, 429), ei 4xx:ssä. Todennettu Windowsilla serverin uudelleenkäynnistyksellä: puskuroidut eventit toimitettiin palautumisen jälkeen.</td>
+            <td><span class="status status-done">valmis</span></td>
           </tr>
         </tbody>
       </table>
