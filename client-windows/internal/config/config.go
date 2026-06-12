@@ -40,6 +40,7 @@ type Config struct {
 	MaxCountableGapSeconds int    `json:"max_countable_gap_seconds"`
 	BatchSize              int    `json:"batch_size"`
 	Locked                 bool   `json:"locked"`
+	DebugMode              bool   `json:"debug_mode"`
 }
 
 func DefaultBaseDir() string {
@@ -147,6 +148,10 @@ func (c *Config) ApplyServerConfig(sc model.ClientConfig) bool {
 	}
 	if sc.MaxCountableGapSeconds > 0 && c.MaxCountableGapSeconds != sc.MaxCountableGapSeconds {
 		c.MaxCountableGapSeconds = sc.MaxCountableGapSeconds
+		changed = true
+	}
+	if sc.DebugMode != nil && c.DebugMode != *sc.DebugMode {
+		c.DebugMode = *sc.DebugMode
 		changed = true
 	}
 	return changed

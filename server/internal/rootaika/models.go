@@ -70,6 +70,7 @@ type ClientConfig struct {
 	UploadIntervalSeconds  int
 	PollIntervalSeconds    int
 	MaxCountableGapSeconds int
+	DebugMode              bool
 	Categories             []ProgramCategory
 }
 
@@ -78,6 +79,7 @@ type Settings struct {
 	UploadIntervalSeconds  int
 	PollIntervalSeconds    int
 	MaxCountableGapSeconds int
+	DebugMode              bool
 }
 
 type Command struct {

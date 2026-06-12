@@ -130,6 +130,7 @@ func (s *Store) seed(ctx context.Context, now time.Time) error {
 		"upload_interval_seconds":   "60",
 		"poll_interval_seconds":     "30",
 		"max_countable_gap_seconds": "300",
+		"debug_mode":                "0",
 	}
 	for key, value := range defaults {
 		if _, err := s.db.ExecContext(ctx, `
@@ -309,6 +310,7 @@ FROM device_config WHERE device_id = ?`, device.ID).
 		return ClientConfig{}, err
 	}
 	config.MaxCountableGapSeconds = settings.MaxCountableGapSeconds
+	config.DebugMode = settings.DebugMode
 
 	categories, err := s.Categories(ctx)
 	if err != nil {
@@ -475,6 +477,7 @@ func (s *Store) UpdateSettings(ctx context.Context, settings Settings, now time.
 		"upload_interval_seconds":   settings.UploadIntervalSeconds,
 		"poll_interval_seconds":     settings.PollIntervalSeconds,
 		"max_countable_gap_seconds": settings.MaxCountableGapSeconds,
+		"debug_mode":                boolToInt(settings.DebugMode),
 	}
 	for key, value := range values {
 		if _, err := tx.ExecContext(ctx, `
@@ -703,12 +706,17 @@ func settingsFromDB(ctx context.Context, db *sql.DB) (Settings, error) {
 		return Settings{}, err
 	}
 
+	return settingsFromValues(values), nil
+}
+
+func settingsFromValues(values map[string]int) Settings {
 	return Settings{
 		IdleThresholdSeconds:   defaultInt(values["idle_threshold_seconds"], 60),
 		UploadIntervalSeconds:  defaultInt(values["upload_interval_seconds"], 60),
 		PollIntervalSeconds:    defaultInt(values["poll_interval_seconds"], 30),
 		MaxCountableGapSeconds: defaultInt(values["max_countable_gap_seconds"], 300),
-	}, nil
+		DebugMode:              values["debug_mode"] != 0,
+	}
 }
 
 func settingsFromTx(ctx context.Context, tx *sql.Tx) (Settings, error) {
@@ -730,12 +738,7 @@ func settingsFromTx(ctx context.Context, tx *sql.Tx) (Settings, error) {
 		}
 		values[key] = intValue
 	}
-	return Settings{
-		IdleThresholdSeconds:   defaultInt(values["idle_threshold_seconds"], 60),
-		UploadIntervalSeconds:  defaultInt(values["upload_interval_seconds"], 60),
-		PollIntervalSeconds:    defaultInt(values["poll_interval_seconds"], 30),
-		MaxCountableGapSeconds: defaultInt(values["max_countable_gap_seconds"], 300),
-	}, rows.Err()
+	return settingsFromValues(values), rows.Err()
 }
 
 func ensureDeviceConfigTx(ctx context.Context, tx *sql.Tx, deviceID int64) error {
@@ -755,6 +758,13 @@ func defaultInt(value, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func defaultDeviceName(clientUUID string) string {

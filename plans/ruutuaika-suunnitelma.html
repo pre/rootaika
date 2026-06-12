@@ -171,6 +171,35 @@
       font-size: 0.86rem;
       font-weight: 650;
     }
+
+    .status {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .status-done {
+      background: #def7ec;
+      color: #03543f;
+    }
+
+    .status-progress {
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .status-todo {
+      background: #fde8e8;
+      color: #9b1c1c;
+    }
+
+    .status-accepted {
+      background: #e6f4f1;
+      color: var(--accent);
+    }
   </style>
 </head>
 <body>
@@ -185,6 +214,69 @@
         Palvelin tallentaa tapahtumat SQLiteen ja tarjoaa web-käyttöliittymän toteuman seurantaan.
       </p>
     </header>
+
+    <section class="section" aria-label="Poikkeamat toteutuksesta">
+      <h2>Poikkeamat suunnitelman ja toteutuksen välillä</h2>
+      <p>
+        Tätä taulukkoa ylläpidetään toteutuksen eri vaiheissa. Se kokoaa yhteen kohdat, joissa toteutus
+        poikkeaa alkuperäisestä suunnitelmasta tai joissa suunnitelmaa on tarkennettu toteutuksen aikana.
+        Tila kertoo, onko poikkeama korjattu, työn alla, vielä tekemättä, vai tietoisesti hyväksytty.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Aihe</th>
+            <th>Suunnitelma</th>
+            <th>Toteutus</th>
+            <th>Tila</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Agentin näkyvyys</td>
+            <td>Agentti ei näy taskbarissa eikä alt-tabissa.</td>
+            <td>Konsoli-ikkuna piilotetaan oletuksena. Palvelinpäästä asetettava <code>debug_mode</code> tuo konsolin näkyviin devausta varten.</td>
+            <td><span class="status status-progress">työn alla</span></td>
+          </tr>
+          <tr>
+            <td>Tila-muutoseventti</td>
+            <td>Havainto syntyy heti, kun tila tai aktiivinen prosessi vaihtuu, sekä säännöllisin välein.</td>
+            <td>Agentti vertaa edelliseen havaintoon ja lähettää heti muutoshetkellä, muutoin heartbeat-välein.</td>
+            <td><span class="status status-progress">työn alla</span></td>
+          </tr>
+          <tr>
+            <td>Viikko- ja kuukausinäkymä</td>
+            <td>Web-UI:ssa päiväkohtaiset summat per laite viikko- ja kuukausitasolla.</td>
+            <td>Toteutetaan palvelimelle omat näkymät päiväkohtaisille summille.</td>
+            <td><span class="status status-progress">työn alla</span></td>
+          </tr>
+          <tr>
+            <td>Service ja agentti -kommunikaatio</td>
+            <td>Service välittää lukitustilan ja agentti välittää eventit servicelle (mekanismia ei nimetty).</td>
+            <td>Loopback-HTTP (<code>127.0.0.1</code>) token-autentikoinnilla, ei nimettyä putkea (IPC). Tämä on tarkennus, ei ristiriita.</td>
+            <td><span class="status status-accepted">hyväksytty</span></td>
+          </tr>
+          <tr>
+            <td>Hallintaendpointit</td>
+            <td>API-luonnoksessa <code>POST /admin/...</code> kuvataan endpointteina.</td>
+            <td>Toteutettu HTML-lomakkeina (POST + redirect), ei JSON-REST-rajapintana.</td>
+            <td><span class="status status-accepted">hyväksytty</span></td>
+          </tr>
+          <tr>
+            <td><code>max_countable_gap_seconds</code> -sijainti</td>
+            <td>Laskennan katkaisuraja mainitaan laskennan yhteydessä.</td>
+            <td>Tallennettu globaaliin <code>settings</code>-tauluun, ei laitekohtaiseen <code>device_config</code>-tauluun.</td>
+            <td><span class="status status-accepted">hyväksytty</span></td>
+          </tr>
+          <tr>
+            <td>Testikattavuus</td>
+            <td>Jokainen koodiluokka ja funktio on testattava.</td>
+            <td>Lisätään kattavat testit. Windows-spesifit Win32-syscall-kääreet eivät aja Linux-CI:ssä, joten ne katetaan rakenteellisesti eristämällä logiikka testattaviin funktioihin.</td>
+            <td><span class="status status-progress">työn alla</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
 
     <section class="summary" aria-label="Yhteenveto">
       <div class="card">
@@ -276,7 +368,8 @@
       <h3>3. Windows User Session Agent</h3>
       <ul>
         <li>Ajetaan kirjautuneen käyttäjän sessiossa.</li>
-        <li>Ei näy taskbarissa eikä alt-tab-valikossa.</li>
+        <li>Ei näy taskbarissa eikä alt-tab-valikossa. Konsoli-ikkuna piilotetaan oletuksena.</li>
+        <li>Jos palvelinpäästä kytketty <code>debug_mode</code> on päällä, agentti näyttää konsoli-ikkunan, josta voi devauksessa seurata mitä tapahtuu.</li>
         <li>Lukee idle-ajan Windows API:n <code>GetLastInputInfo</code>-kutsulla.</li>
         <li>Lukee aktiivisen ikkunan <code>GetForegroundWindow</code>-kutsulla.</li>
         <li>Selvittää prosessin PID:n <code>GetWindowThreadProcessId</code>-kutsulla.</li>
@@ -367,7 +460,8 @@
         <li>Foreground-prosessin tarkistus: esimerkiksi 1-5 sekunnin välein.</li>
         <li><code>activity_observed</code> syntyy säännöllisesti sekä heti, kun tila tai aktiivinen prosessi vaihtuu.</li>
         <li>Eventtien lähetys: batchinä esimerkiksi 1 minuutin välein.</li>
-        <li>Configin ja komentojen polling: esimerkiksi 30 sekunnin välein.</li>
+        <li>Configin ja komentojen polling: esimerkiksi 30 sekunnin välein. Config sisältää myös <code>debug_mode</code>-lipun.</li>
+        <li><code>activity_observed</code> lähetetään heti, kun tila tai aktiivinen prosessi vaihtuu, ja lisäksi heartbeat-välein, vaikka mikään ei muuttuisi.</li>
         <li>Jos serveri ei vastaa, eventit jäävät paikalliseen SQLite-puskuriin ja lähetetään myöhemmin.</li>
       </ul>
     </section>
@@ -391,7 +485,7 @@
           <tr>
             <td><code>GET /api/v1/client/config?client_id=...</code></td>
             <td>client</td>
-            <td>Client hakee idle-rajan, upload-välin, polling-välin ja kategoriasäännöt.</td>
+            <td>Client hakee idle-rajan, upload-välin, polling-välin, <code>debug_mode</code>-lipun ja kategoriasäännöt.</td>
           </tr>
           <tr>
             <td><code>GET /api/v1/client/commands?client_id=...</code></td>
@@ -517,7 +611,7 @@
         <li>Kuukausinäkymä: päiväkohtainen tai viikkokohtainen yhteenveto.</li>
         <li>Laitteet: nimi, UUID, käyttäjäliitos ja viimeisin yhteys.</li>
         <li>Käyttäjät: käyttäjien luonti ja nimeäminen.</li>
-        <li>Asetukset: idle-raja, upload-väli ja polling-väli.</li>
+        <li>Asetukset: idle-raja, upload-väli, polling-väli, maksimilaskentaväli ja debug-tila.</li>
         <li>Kategoriat: prosessinimipohjaiset kategoriat, esim. pelit, selain ja muu.</li>
         <li>Admin-toiminnot: lock/unlock, asetusten muokkaus ja laite-/käyttäjähallinta.</li>
       </ul>
@@ -528,7 +622,7 @@
       <ul>
         <li>Admin luo web-UI:sta lock- tai unlock-komennon tietylle laitteelle.</li>
         <li>Client hakee komennon pollingilla.</li>
-        <li>Windows Service välittää lukitustilan käyttäjäsession agentille.</li>
+        <li>Windows Service välittää lukitustilan käyttäjäsession agentille loopback-HTTP:n (<code>127.0.0.1</code>) yli token-autentikoinnilla.</li>
         <li>Agentti näyttää mustan fullscreen topmost -ikkunan.</li>
         <li>Agentti palauttaa ikkunan etualalle, jos fokus vaihtuu.</li>
         <li>Lukitus puretaan vain palvelimelta tulevalla unlock-komennolla.</li>
@@ -579,7 +673,7 @@
         <li>Web-UI:n katselunäkymät: tänään, viikko, kuukausi ja ohjelmakohtainen erittely.</li>
         <li>Admin-UI: asetukset, käyttäjät, laitteet, kategoriat ja lock/unlock.</li>
         <li>Windows Service: UUID, config-cache, local SQLite queue, upload worker ja command polling.</li>
-        <li>User Session Agent: idle-tunnistus, foreground process -tunnistus, eventtien välitys servicelle ja musta overlay lukitustilassa.</li>
+        <li>User Session Agent: idle-tunnistus, foreground process -tunnistus, eventtien välitys servicelle loopback-HTTP:n yli ja musta overlay lukitustilassa.</li>
         <li>Windows-asennus: manuaalisesti ajettava PowerShell-skripti, joka asentaa servicen ja suojaa configin ACL-oikeuksilla.</li>
         <li>Server-laskenta: eventeistä käyttöjaksot ja raportit.</li>
         <li>Watchdog: service valvoo session-agenttia ja käynnistää sen uudelleen, jos käyttäjä sammuttaa sen.</li>

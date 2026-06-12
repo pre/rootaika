@@ -29,6 +29,10 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/" && r.Method == http.MethodGet:
 		a.handleDashboard(w, r)
+	case r.URL.Path == "/week" && r.Method == http.MethodGet:
+		a.handleWeek(w, r)
+	case r.URL.Path == "/month" && r.Method == http.MethodGet:
+		a.handleMonth(w, r)
 	case r.URL.Path == "/api/v1/events/batch":
 		a.handleEventsBatch(w, r)
 	case r.URL.Path == "/api/v1/client/config":

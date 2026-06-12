@@ -247,6 +247,8 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
       </div>
       <nav class="inline">
         <a href="#today">Tänään</a>
+        <a href="/week">Viikko</a>
+        <a href="/month">Kuukausi</a>
         <a href="#devices">Laitteet</a>
         <a href="#users">Käyttäjät</a>
         <a href="#settings">Asetukset</a>
@@ -338,6 +340,7 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
         <label class="stack">Upload-väli, s<input name="upload_interval_seconds" type="number" min="1" value="{{.Settings.UploadIntervalSeconds}}" {{if .ReadOnly}}disabled{{end}}></label>
         <label class="stack">Polling-väli, s<input name="poll_interval_seconds" type="number" min="1" value="{{.Settings.PollIntervalSeconds}}" {{if .ReadOnly}}disabled{{end}}></label>
         <label class="stack">Maksimilaskentaväli, s<input name="max_countable_gap_seconds" type="number" min="1" value="{{.Settings.MaxCountableGapSeconds}}" {{if .ReadOnly}}disabled{{end}}></label>
+        <label class="inline"><input name="debug_mode" type="checkbox" value="on" {{if .Settings.DebugMode}}checked{{end}} {{if .ReadOnly}}disabled{{end}}> Debug-tila (näytä clientin konsoli)</label>
         {{if not .ReadOnly}}<div><button type="submit">Tallenna asetukset</button></div>{{end}}
       </form>
     </section>
