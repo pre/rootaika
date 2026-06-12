@@ -18,9 +18,15 @@ import (
 
 	"rootaika/client-windows/internal/activity"
 	"rootaika/client-windows/internal/config"
+	"rootaika/client-windows/internal/consolewin"
 	"rootaika/client-windows/internal/lock"
 	"rootaika/client-windows/internal/model"
 )
+
+// heartbeat is the longest interval between activity_observed events when the
+// state and foreground process stay unchanged. It keeps server-side segments
+// bounded well below max_countable_gap_seconds even on quiet periods.
+const heartbeat = 60 * time.Second
 
 func main() {
 	var cfgPath string
@@ -43,6 +49,8 @@ func run(ctx context.Context, cfgPath string) error {
 	probe := activity.NewProbe()
 	locker := lock.NewController()
 	defer locker.Close()
+	console := consolewin.New()
+	defer console.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	local := localClient{httpClient: httpClient, address: cfg.AgentListenAddress, token: cfg.AgentToken}
@@ -50,13 +58,20 @@ func run(ctx context.Context, cfgPath string) error {
 		Locked:                 cfg.Locked,
 		IdleThresholdSeconds:   cfg.IdleThresholdSeconds,
 		ObserveIntervalSeconds: cfg.ObserveIntervalSeconds,
+		DebugMode:              cfg.DebugMode,
 	}
+
+	var last *model.Event
+	var lastSentAt time.Time
 
 	for {
 		if latest, err := local.fetchState(ctx); err == nil {
 			state = latest
 		} else {
 			log.Printf("fetch service state failed: %v", err)
+		}
+		if err := console.SetVisible(state.DebugMode); err != nil {
+			log.Printf("set console visibility failed: %v", err)
 		}
 		if err := locker.SetLocked(ctx, state.Locked); err != nil {
 			log.Printf("set locked state failed: %v", err)
@@ -67,8 +82,14 @@ func run(ctx context.Context, cfgPath string) error {
 			log.Printf("activity probe failed: %v", err)
 		} else {
 			event := eventFromSnapshot(snapshot, state)
-			if err := local.postEvent(ctx, event); err != nil {
-				log.Printf("post event to service failed: %v", err)
+			if shouldEmit(last, event, lastSentAt, event.OccurredAt, heartbeat) {
+				if err := local.postEvent(ctx, event); err != nil {
+					log.Printf("post event to service failed: %v", err)
+				} else {
+					stored := event
+					last = &stored
+					lastSentAt = event.OccurredAt
+				}
 			}
 		}
 
@@ -80,6 +101,23 @@ func run(ctx context.Context, cfgPath string) error {
 			return nil
 		}
 	}
+}
+
+// shouldEmit decides whether the freshly observed event must be sent. An event
+// is emitted when the state or foreground process changed since the last sent
+// event, or when the heartbeat interval has elapsed, so the server sees changes
+// immediately while still receiving periodic confirmation that the device is alive.
+func shouldEmit(last *model.Event, current model.Event, lastSentAt, now time.Time, heartbeat time.Duration) bool {
+	if last == nil {
+		return true
+	}
+	if last.State != current.State || last.ProcessName != current.ProcessName {
+		return true
+	}
+	if heartbeat <= 0 {
+		return true
+	}
+	return !now.Before(lastSentAt.Add(heartbeat))
 }
 
 func eventFromSnapshot(snapshot activity.Snapshot, state serviceState) model.Event {
@@ -188,6 +226,7 @@ type serviceState struct {
 	Locked                 bool `json:"locked"`
 	IdleThresholdSeconds   int  `json:"idle_threshold_seconds"`
 	ObserveIntervalSeconds int  `json:"observe_interval_seconds"`
+	DebugMode              bool `json:"debug_mode"`
 }
 
 type agentEventsRequest struct {

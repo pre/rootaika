@@ -36,11 +36,12 @@ type EventBatch struct {
 }
 
 type ClientConfig struct {
-	IdleThresholdSeconds   int `json:"idle_threshold_seconds"`
-	UploadIntervalSeconds  int `json:"upload_interval_seconds"`
-	PollIntervalSeconds    int `json:"poll_interval_seconds"`
-	ObserveIntervalSeconds int `json:"observe_interval_seconds,omitempty"`
-	MaxCountableGapSeconds int `json:"max_countable_gap_seconds,omitempty"`
+	IdleThresholdSeconds   int   `json:"idle_threshold_seconds"`
+	UploadIntervalSeconds  int   `json:"upload_interval_seconds"`
+	PollIntervalSeconds    int   `json:"poll_interval_seconds"`
+	ObserveIntervalSeconds int   `json:"observe_interval_seconds,omitempty"`
+	MaxCountableGapSeconds int   `json:"max_countable_gap_seconds,omitempty"`
+	DebugMode              *bool `json:"debug_mode,omitempty"`
 }
 
 type CommandType string

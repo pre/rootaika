@@ -71,6 +71,7 @@ func startAgentHTTP(ctx context.Context, store *stateStore, eventBuffer *buffer.
 			Locked:                 cfg.Locked,
 			IdleThresholdSeconds:   cfg.IdleThresholdSeconds,
 			ObserveIntervalSeconds: cfg.ObserveIntervalSeconds,
+			DebugMode:              cfg.DebugMode,
 		})
 	})
 	mux.HandleFunc("/agent/events", func(w http.ResponseWriter, r *http.Request) {
@@ -288,4 +289,5 @@ type agentStateResponse struct {
 	Locked                 bool `json:"locked"`
 	IdleThresholdSeconds   int  `json:"idle_threshold_seconds"`
 	ObserveIntervalSeconds int  `json:"observe_interval_seconds"`
+	DebugMode              bool `json:"debug_mode"`
 }

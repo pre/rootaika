@@ -5,6 +5,24 @@ import (
 	"time"
 )
 
+// DaySpan is a single day window in UTC together with a display label.
+type DaySpan struct {
+	Start time.Time
+	End   time.Time
+	Label string
+}
+
+// DailyUsage computes total active seconds for each day span. The events slice
+// should cover the whole range plus the last event before the first span so
+// carry-over across day boundaries is counted correctly.
+func DailyUsage(events []ActivityEvent, days []DaySpan, now time.Time, maxGap time.Duration) []int64 {
+	totals := make([]int64, len(days))
+	for i, day := range days {
+		totals[i] = CalculateUsage(events, day.Start, day.End, now, maxGap).TotalSeconds
+	}
+	return totals
+}
+
 func CalculateUsage(events []ActivityEvent, start, end, now time.Time, maxGap time.Duration) UsageReport {
 	report := UsageReport{ByProcess: map[string]int64{}}
 	if len(events) == 0 || !end.After(start) {

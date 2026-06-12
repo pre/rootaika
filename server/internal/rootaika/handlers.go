@@ -141,6 +141,7 @@ func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 		"upload_interval_seconds":   config.UploadIntervalSeconds,
 		"poll_interval_seconds":     config.PollIntervalSeconds,
 		"max_countable_gap_seconds": config.MaxCountableGapSeconds,
+		"debug_mode":                config.DebugMode,
 		"categories":                categories,
 	})
 }
@@ -341,7 +342,17 @@ func settingsFromForm(r *http.Request) (Settings, error) {
 		UploadIntervalSeconds:  upload,
 		PollIntervalSeconds:    poll,
 		MaxCountableGapSeconds: maxGap,
+		DebugMode:              checkboxForm(r, "debug_mode"),
 	}, nil
+}
+
+func checkboxForm(r *http.Request, key string) bool {
+	switch strings.ToLower(strings.TrimSpace(r.FormValue(key))) {
+	case "on", "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func positiveIntForm(r *http.Request, key string) (int, error) {
