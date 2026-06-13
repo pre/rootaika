@@ -80,6 +80,7 @@ type Settings struct {
 	UploadIntervalSeconds  int
 	PollIntervalSeconds    int
 	MaxCountableGapSeconds int
+	ChartYMaxMinutes       int
 	DebugMode              bool
 	DebugUnassignedClients bool
 }

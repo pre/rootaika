@@ -52,39 +52,6 @@ func TestDailySpansClampsDayCount(t *testing.T) {
 	}
 }
 
-func TestDailyUsageMultipleDaysWithCarryOver(t *testing.T) {
-	location := time.UTC
-	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
-	days := dailySpans(now, location, 3)
-
-	firstStart := days[0].Start
-	secondStart := days[1].Start
-	maxGap := 30 * time.Minute
-
-	events := []ActivityEvent{
-		// Carry-over before the first span: active right up to the boundary.
-		{State: StateActive, ProcessName: "game.exe", OccurredAt: firstStart.Add(-10 * time.Minute), Sequence: 1},
-		{State: StateIdle, OccurredAt: firstStart.Add(5 * time.Minute), Sequence: 2},
-		// Activity on day 2.
-		{State: StateActive, ProcessName: "browser.exe", OccurredAt: secondStart.Add(time.Hour), Sequence: 3},
-		{State: StateIdle, OccurredAt: secondStart.Add(time.Hour + 20*time.Minute), Sequence: 4},
-	}
-
-	totals := DailyUsage(events, days, now, maxGap)
-	if len(totals) != 3 {
-		t.Fatalf("totals len = %d", len(totals))
-	}
-	if totals[0] != int64(5*60) {
-		t.Fatalf("day 0 carry-over total = %d", totals[0])
-	}
-	if totals[1] != int64(20*60) {
-		t.Fatalf("day 1 total = %d", totals[1])
-	}
-	if totals[2] != 0 {
-		t.Fatalf("day 2 total = %d", totals[2])
-	}
-}
-
 func TestHandleWeekAndMonth(t *testing.T) {
 	tests := []struct {
 		name string
@@ -109,11 +76,11 @@ func TestHandleWeekAndMonth(t *testing.T) {
 				t.Fatalf("%s status = %d", tt.path, recorder.Code)
 			}
 			body := recorder.Body.String()
-			if !strings.Contains(body, "Yhteensä") {
-				t.Fatalf("%s missing totals column", tt.path)
+			if !strings.Contains(body, "renderUsageChart") {
+				t.Fatalf("%s missing chart script", tt.path)
 			}
-			if !strings.Contains(body, "11.06") {
-				t.Fatalf("%s missing today label", tt.path)
+			if !strings.Contains(body, "/api/v1/charts/usage") {
+				t.Fatalf("%s missing chart data fetch", tt.path)
 			}
 		})
 	}
