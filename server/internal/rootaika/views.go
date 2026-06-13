@@ -159,6 +159,16 @@ func selectedUser(userID int64, deviceUserID *int64) bool {
 	return deviceUserID != nil && *deviceUserID == userID
 }
 
+// deviceLabel renders a collapsible section title as "User name (device id)",
+// falling back to the device display name when no user is assigned yet.
+func deviceLabel(device Device) string {
+	name := device.UserName
+	if name == "" {
+		name = device.DisplayName
+	}
+	return name + " (" + strconv.FormatInt(device.ID, 10) + ")"
+}
+
 var templateLocation = func() *time.Location {
 	location, err := time.LoadLocation("Europe/Helsinki")
 	if err != nil {
@@ -172,6 +182,7 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
 	"formatTime":    formatLocal,
 	"formatTimePtr": formatLocalPtr,
 	"selectedUser":  selectedUser,
+	"deviceLabel":   deviceLabel,
 }).Parse(`<!doctype html>
 <html lang="fi">
 <head>
@@ -208,6 +219,15 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
     .stack { display:grid; gap:8px; }
     .actions form { margin:0 0 6px; }
     .compact th, .compact td { padding:7px 8px; }
+    details.device { border:1px solid var(--border); border-radius:8px; background:var(--surface); overflow:hidden; }
+    details.device > summary { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:11px 14px; cursor:pointer; list-style:none; font-weight:650; }
+    details.device > summary::-webkit-details-marker { display:none; }
+    details.device > summary::before { content:"\25B8"; color:var(--muted); font-weight:400; margin-right:2px; transition:transform .12s ease; }
+    details.device[open] > summary::before { transform:rotate(90deg); }
+    details.device > summary:hover { background:#f0f4f8; }
+    .device-title { flex:1; color:var(--accent); }
+    .device-total { color:var(--muted); font-weight:600; }
+    .device-body { padding:0 14px 14px; }
     @media (max-width: 760px) {
       header { display:block; }
       table { display:block; overflow-x:auto; }
@@ -229,22 +249,26 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
     {{if .ReadOnly}}<div class="notice">Client-tunnuksella näkymä on read-only. Muutokset vaativat admin-tunnuksen.</div>{{end}}
 
     <section id="today">
-      <h2>Tänään</h2>
-      <div class="grid">
+      <h2>Tänään, ohjelmat per laite</h2>
+      <div class="stack">
         {{range .Devices}}
-        <article class="card">
-          <strong>{{.Device.DisplayName}}</strong>
-          <p>{{human .TotalSeconds}} aktiivista käyttöä</p>
-          <p class="muted">Viimeksi nähty {{formatTime .Device.LastSeenAt}} · {{.LockState}}</p>
-          {{if .Processes}}
-          <table class="compact">
-            <thead><tr><th>Ohjelma</th><th>Aika</th></tr></thead>
-            <tbody>
-              {{range .Processes}}<tr><td><code>{{.Name}}</code></td><td>{{human .Seconds}}</td></tr>{{end}}
-            </tbody>
-          </table>
-          {{else}}<p class="muted">Ei aktiivisia havaintoja tälle päivälle.</p>{{end}}
-        </article>
+        <details class="device">
+          <summary>
+            <span class="device-title">{{deviceLabel .Device}}</span>
+            <span class="device-total">{{human .TotalSeconds}}</span>
+          </summary>
+          <div class="device-body">
+            <p class="muted">Viimeksi nähty {{formatTime .Device.LastSeenAt}} · {{.LockState}}</p>
+            {{if .Processes}}
+            <table class="compact">
+              <thead><tr><th>Ohjelma</th><th>Aika</th></tr></thead>
+              <tbody>
+                {{range .Processes}}<tr><td><code>{{.Name}}</code></td><td>{{human .Seconds}}</td></tr>{{end}}
+              </tbody>
+            </table>
+            {{else}}<p class="muted">Ei aktiivisia havaintoja tälle päivälle.</p>{{end}}
+          </div>
+        </details>
         {{else}}
         <article class="card"><strong>Ei laitteita</strong><p class="muted">Ensimmäinen client luodaan automaattisesti, kun se hakee configin tai lähettää eventtejä.</p></article>
         {{end}}

@@ -87,6 +87,17 @@ func TestFormatLocalAndPtr(t *testing.T) {
 	}
 }
 
+func TestDeviceLabel(t *testing.T) {
+	withUser := Device{ID: 7, DisplayName: "Olohuone-PC", UserName: "Aino"}
+	if got := deviceLabel(withUser); got != "Aino (7)" {
+		t.Fatalf("deviceLabel with user = %q, want \"Aino (7)\"", got)
+	}
+	noUser := Device{ID: 3, DisplayName: "Tuntematon-PC"}
+	if got := deviceLabel(noUser); got != "Tuntematon-PC (3)" {
+		t.Fatalf("deviceLabel without user = %q, want fallback to display name", got)
+	}
+}
+
 func TestDashboardRendersWithDeviceAndDebugCheckbox(t *testing.T) {
 	app := testApp(t)
 	ctx := context.Background()
@@ -115,6 +126,13 @@ func TestDashboardRendersWithDeviceAndDebugCheckbox(t *testing.T) {
 	}
 	if !strings.Contains(body, "steam.exe") {
 		t.Fatalf("dashboard missing process data")
+	}
+	// Today section uses collapsible per-device <details> blocks, closed by default.
+	if !strings.Contains(body, "<details class=\"device\">") {
+		t.Fatalf("dashboard missing collapsible device section")
+	}
+	if strings.Contains(body, "<details class=\"device\" open>") {
+		t.Fatalf("device sections should be closed by default")
 	}
 	if !strings.Contains(body, `name="debug_mode"`) {
 		t.Fatalf("dashboard missing debug_mode checkbox")
