@@ -83,32 +83,6 @@ func (c *Client) FetchConfig(ctx context.Context, clientID string) (model.Client
 	return cfg, nil
 }
 
-func (c *Client) FetchCommands(ctx context.Context, clientID string) ([]model.Command, error) {
-	q := url.Values{"client_id": []string{clientID}}
-	body, err := c.doJSON(ctx, http.MethodGet, "/api/v1/client/commands", q, nil)
-	if err != nil {
-		return nil, err
-	}
-	var wrapped model.CommandsResponse
-	if err := json.Unmarshal(body, &wrapped); err == nil && wrapped.Commands != nil {
-		return wrapped.Commands, nil
-	}
-	var commands []model.Command
-	if err := json.Unmarshal(body, &commands); err != nil {
-		return nil, err
-	}
-	return commands, nil
-}
-
-func (c *Client) AckCommand(ctx context.Context, commandID string) error {
-	if commandID == "" {
-		return fmt.Errorf("command id is empty")
-	}
-	path := fmt.Sprintf("/api/v1/client/commands/%s/ack", url.PathEscape(commandID))
-	_, err := c.doJSON(ctx, http.MethodPost, path, nil, nil)
-	return err
-}
-
 func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, payload any) ([]byte, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("server URL is empty")

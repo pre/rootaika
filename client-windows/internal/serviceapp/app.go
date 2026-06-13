@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -184,54 +183,8 @@ func pollOnce(ctx context.Context, store *stateStore) error {
 	}); err != nil {
 		return err
 	}
-
-	commands, err := client.FetchCommands(ctx, cfg.ClientID)
-	if err != nil {
-		return err
-	}
-	if len(commands) > 0 {
-		summaries := make([]string, 0, len(commands))
-		for _, command := range commands {
-			summaries = append(summaries, fmt.Sprintf("%s (%s)", command.Identifier(), command.Type))
-		}
-		log.Printf("received %d command(s) from server: %s", len(commands), strings.Join(summaries, ", "))
-	}
-	for _, command := range commands {
-		if err := handleCommand(store, command); err != nil {
-			log.Printf("command %s (%s) failed: %v", command.Identifier(), command.Type, err)
-			continue
-		}
-		log.Printf("command %s (%s) handled", command.Identifier(), command.Type)
-		if err := client.AckCommand(ctx, command.Identifier()); err != nil {
-			log.Printf("command %s ack failed: %v", command.Identifier(), err)
-		}
-	}
+	log.Printf("config applied: locked=%t", store.snapshot().Locked)
 	return nil
-}
-
-func handleCommand(store *stateStore, command model.Command) error {
-	switch strings.ToLower(string(command.Type)) {
-	case string(model.CommandLock):
-		return store.update(func(cfg *config.Config) bool {
-			if cfg.Locked && cfg.LockMessage == command.Message {
-				return false
-			}
-			cfg.Locked = true
-			cfg.LockMessage = command.Message
-			return true
-		})
-	case string(model.CommandUnlock):
-		return store.update(func(cfg *config.Config) bool {
-			if !cfg.Locked && cfg.LockMessage == "" {
-				return false
-			}
-			cfg.Locked = false
-			cfg.LockMessage = ""
-			return true
-		})
-	default:
-		return fmt.Errorf("unsupported command type %q", command.Type)
-	}
 }
 
 func watchdogLoop(ctx context.Context, store *stateStore, cfgPath string) {

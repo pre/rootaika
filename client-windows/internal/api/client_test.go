@@ -15,7 +15,6 @@ import (
 
 func TestClientPayloadsAndBasicAuth(t *testing.T) {
 	ctx := context.Background()
-	acked := false
 
 	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		user, pass, ok := r.BasicAuth()
@@ -42,15 +41,7 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 			if r.URL.Query().Get("client_id") != "client-1" {
 				t.Fatalf("missing client_id query")
 			}
-			return testResponse(http.StatusOK, `{"idle_threshold_seconds":30,"upload_interval_seconds":15,"poll_interval_seconds":5}`), nil
-		case "/api/v1/client/commands":
-			return testResponse(http.StatusOK, `{"commands":[{"command_id":"cmd-1","type":"lock"}]}`), nil
-		case "/api/v1/client/commands/cmd-1/ack":
-			if r.Method != http.MethodPost {
-				t.Fatalf("unexpected ack method: %s", r.Method)
-			}
-			acked = true
-			return testResponse(http.StatusNoContent, ""), nil
+			return testResponse(http.StatusOK, `{"idle_threshold_seconds":30,"upload_interval_seconds":15,"poll_interval_seconds":5,"locked":true,"lock_message":"Aika lopettaa"}`), nil
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 			return nil, nil
@@ -80,19 +71,8 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 	if cfg.IdleThresholdSeconds != 30 || cfg.UploadIntervalSeconds != 15 || cfg.PollIntervalSeconds != 5 {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
-
-	commands, err := client.FetchCommands(ctx, "client-1")
-	if err != nil {
-		t.Fatalf("FetchCommands: %v", err)
-	}
-	if len(commands) != 1 || commands[0].Identifier() != "cmd-1" || commands[0].Type != model.CommandLock {
-		t.Fatalf("unexpected commands: %+v", commands)
-	}
-	if err := client.AckCommand(ctx, commands[0].Identifier()); err != nil {
-		t.Fatalf("AckCommand: %v", err)
-	}
-	if !acked {
-		t.Fatalf("ack endpoint was not called")
+	if cfg.Locked == nil || !*cfg.Locked || cfg.LockMessage != "Aika lopettaa" {
+		t.Fatalf("unexpected lock in config: %+v", cfg)
 	}
 }
 
@@ -112,8 +92,8 @@ func TestRetriesOnServerErrorThenSucceeds(t *testing.T) {
 		return testResponse(http.StatusOK, `{"commands":[]}`), nil
 	}))
 
-	if _, err := client.FetchCommands(context.Background(), "client-1"); err != nil {
-		t.Fatalf("FetchCommands: %v", err)
+	if _, err := client.FetchConfig(context.Background(), "client-1"); err != nil {
+		t.Fatalf("FetchConfig: %v", err)
 	}
 	if calls != 3 {
 		t.Fatalf("expected 3 attempts, got %d", calls)
@@ -144,7 +124,7 @@ func TestRetriesOnTransportErrorAndGivesUp(t *testing.T) {
 	client.WithRetry(3, time.Millisecond, time.Millisecond)
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
-	if _, err := client.FetchCommands(context.Background(), "client-1"); err == nil {
+	if _, err := client.FetchConfig(context.Background(), "client-1"); err == nil {
 		t.Fatalf("expected error after exhausting retries")
 	}
 	if calls != 3 {
@@ -161,7 +141,7 @@ func TestStopsRetryingWhenContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := client.FetchCommands(ctx, "client-1"); err == nil {
+	if _, err := client.FetchConfig(ctx, "client-1"); err == nil {
 		t.Fatalf("expected error on cancelled context")
 	}
 	if calls != 1 {
@@ -184,20 +164,6 @@ func TestBackoffDoublesAndCaps(t *testing.T) {
 		if got := client.backoff(tc.attempt); got != tc.want {
 			t.Fatalf("backoff(%d) = %v, want %v", tc.attempt, got, tc.want)
 		}
-	}
-}
-
-func TestFetchCommandsDecodesNumericServerID(t *testing.T) {
-	client := testClientNoSleep(roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return testResponse(http.StatusOK, `{"commands":[{"id":42,"type":"lock","created_at":"2026-06-13T12:00:00Z"}]}`), nil
-	}))
-
-	commands, err := client.FetchCommands(context.Background(), "client-1")
-	if err != nil {
-		t.Fatalf("FetchCommands: %v", err)
-	}
-	if len(commands) != 1 || commands[0].Identifier() != "42" || commands[0].Type != model.CommandLock {
-		t.Fatalf("unexpected commands: %+v", commands)
 	}
 }
 

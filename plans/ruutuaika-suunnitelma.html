@@ -247,7 +247,7 @@
           <tr>
             <td>Laitteen poisto</td>
             <td>Suunnitelmassa mainitaan laitteiden nimeäminen ja käyttäjäliitos, mutta ei poistoa.</td>
-            <td>Admin-UI:ssa laitteen voi poistaa varmistuskysymyksen kautta. Poisto poistaa myös laitteen eventit, konfigin ja komennot.</td>
+            <td>Admin-UI:ssa laitteen voi poistaa varmistuskysymyksen kautta. Poisto poistaa myös laitteen eventit ja konfigin.</td>
             <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>
@@ -265,7 +265,13 @@
           <tr>
             <td>Lukitusruutu</td>
             <td>Agentti näyttää lukitustilassa mustan fullscreen topmost -ikkunan.</td>
-            <td>Musta ruutu korvattu vihreällä, jossa lukee <code>rootaika</code> ja sen alla palvelimelta tuleva viesti. Admin kirjoittaa viestin lock-lomakkeeseen, ja se kulkee <code>commands.message</code>-sarakkeesta clientin configiin ja agentille. Viesti välitetään PowerShell-overlaylle ympäristömuuttujassa injektiosuojan vuoksi.</td>
+            <td>Musta ruutu korvattu vihreällä, jossa lukee <code>rootaika</code> ja sen alla palvelimelta tuleva viesti. Viesti välitetään PowerShell-overlaylle ympäristömuuttujassa injektiosuojan vuoksi.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
+            <td>Lukitus konfiguraatioon</td>
+            <td>Lukitus välitettiin transienttina <code>lock</code>/<code>unlock</code>-komentona (<code>commands</code>-taulu + <code>/api/v1/client/commands</code> ja <code>/ack</code>), joka kuitattiin kerran.</td>
+            <td>Lukitus on jatkuva tila laitekohtaisessa <code>device_config</code>-taulussa (<code>locked</code>, <code>lock_message</code>) ja kulkee config-vastauksessa. Client tarkistaa lukituksen joka config-pollissa, joten suljettu overlay palaa. Koko command-mekanismi (taulu, endpointit, admin "Komennot"-näkymä) poistettu. Overlay kovennettu: piilotettu alt-tabista (<code>WS_EX_TOOLWINDOW</code>), manuaalinen sulkeminen estetty (FormClosing), ja service/agent käynnistää sen uudelleen jos prosessi kuolee lukitustilassa. Todennettava käsin Windowsilla.</td>
             <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>

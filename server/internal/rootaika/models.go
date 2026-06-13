@@ -13,12 +13,6 @@ const (
 	StateActive = "active"
 	StateIdle   = "idle"
 	StateLocked = "locked"
-
-	CommandLock   = "lock"
-	CommandUnlock = "unlock"
-
-	CommandStatusPending = "pending"
-	CommandStatusAcked   = "acked"
 )
 
 type Credential struct {
@@ -42,6 +36,7 @@ type Device struct {
 	RegistrationStatus string
 	CreatedAt          time.Time
 	LastSeenAt         time.Time
+	Locked             bool
 }
 
 type ActivityEvent struct {
@@ -71,6 +66,8 @@ type ClientConfig struct {
 	PollIntervalSeconds    int
 	MaxCountableGapSeconds int
 	DebugMode              bool
+	Locked                 bool
+	LockMessage            string
 	Categories             []ProgramCategory
 }
 
@@ -81,17 +78,6 @@ type Settings struct {
 	MaxCountableGapSeconds int
 	DebugMode              bool
 	DebugUnassignedClients bool
-}
-
-type Command struct {
-	ID        int64
-	DeviceID  int64
-	Device    string
-	Type      string
-	Status    string
-	Message   string
-	CreatedAt time.Time
-	AckAt     *time.Time
 }
 
 type ProgramCategory struct {
@@ -109,8 +95,4 @@ type UsageReport struct {
 
 func validState(state string) bool {
 	return state == StateActive || state == StateIdle || state == StateLocked
-}
-
-func validCommand(command string) bool {
-	return command == CommandLock || command == CommandUnlock
 }

@@ -1,7 +1,6 @@
 package model
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -39,35 +38,12 @@ type EventBatch struct {
 }
 
 type ClientConfig struct {
-	IdleThresholdSeconds   int   `json:"idle_threshold_seconds"`
-	UploadIntervalSeconds  int   `json:"upload_interval_seconds"`
-	PollIntervalSeconds    int   `json:"poll_interval_seconds"`
-	ObserveIntervalSeconds int   `json:"observe_interval_seconds,omitempty"`
-	MaxCountableGapSeconds int   `json:"max_countable_gap_seconds,omitempty"`
-	DebugMode              *bool `json:"debug_mode,omitempty"`
-}
-
-type CommandType string
-
-const (
-	CommandLock   CommandType = "lock"
-	CommandUnlock CommandType = "unlock"
-)
-
-type Command struct {
-	CommandID string      `json:"command_id,omitempty"`
-	ID        json.Number `json:"id,omitempty"`
-	Type      CommandType `json:"type"`
-	Message   string      `json:"message,omitempty"`
-}
-
-func (c Command) Identifier() string {
-	if c.CommandID != "" {
-		return c.CommandID
-	}
-	return c.ID.String()
-}
-
-type CommandsResponse struct {
-	Commands []Command `json:"commands"`
+	IdleThresholdSeconds   int    `json:"idle_threshold_seconds"`
+	UploadIntervalSeconds  int    `json:"upload_interval_seconds"`
+	PollIntervalSeconds    int    `json:"poll_interval_seconds"`
+	ObserveIntervalSeconds int    `json:"observe_interval_seconds,omitempty"`
+	MaxCountableGapSeconds int    `json:"max_countable_gap_seconds,omitempty"`
+	DebugMode              *bool  `json:"debug_mode,omitempty"`
+	Locked                 *bool  `json:"locked,omitempty"`
+	LockMessage            string `json:"lock_message,omitempty"`
 }

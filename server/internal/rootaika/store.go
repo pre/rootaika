@@ -86,19 +86,10 @@ CREATE TABLE IF NOT EXISTS device_config (
   device_id INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
   idle_threshold_seconds INTEGER NOT NULL,
   upload_interval_seconds INTEGER NOT NULL,
-  poll_interval_seconds INTEGER NOT NULL
+  poll_interval_seconds INTEGER NOT NULL,
+  locked INTEGER NOT NULL DEFAULT 0,
+  lock_message TEXT NOT NULL DEFAULT ''
 );
-
-CREATE TABLE IF NOT EXISTS commands (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-  type TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
-  message TEXT NOT NULL DEFAULT '',
-  created_at_utc TEXT NOT NULL,
-  ack_at_utc TEXT
-);
-CREATE INDEX IF NOT EXISTS commands_device_status_idx ON commands(device_id, status, created_at_utc);
 
 CREATE TABLE IF NOT EXISTS program_categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,7 +116,10 @@ CREATE TABLE IF NOT EXISTS auth_credentials (
 	if err != nil {
 		return err
 	}
-	return s.ensureColumn(ctx, "commands", "message", "TEXT NOT NULL DEFAULT ''")
+	if err := s.ensureColumn(ctx, "device_config", "locked", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return s.ensureColumn(ctx, "device_config", "lock_message", "TEXT NOT NULL DEFAULT ''")
 }
 
 // ensureColumn adds a column to an existing table when it is missing, so older
@@ -334,9 +328,10 @@ func (s *Store) ClientConfig(ctx context.Context, clientUUID string, now time.Ti
 	var config ClientConfig
 	config.DeviceID = device.ID
 	err = s.db.QueryRowContext(ctx, `
-SELECT idle_threshold_seconds, upload_interval_seconds, poll_interval_seconds
+SELECT idle_threshold_seconds, upload_interval_seconds, poll_interval_seconds, locked, lock_message
 FROM device_config WHERE device_id = ?`, device.ID).
-		Scan(&config.IdleThresholdSeconds, &config.UploadIntervalSeconds, &config.PollIntervalSeconds)
+		Scan(&config.IdleThresholdSeconds, &config.UploadIntervalSeconds, &config.PollIntervalSeconds,
+			&config.Locked, &config.LockMessage)
 	if err != nil {
 		return ClientConfig{}, err
 	}
@@ -356,101 +351,34 @@ FROM device_config WHERE device_id = ?`, device.ID).
 	return config, nil
 }
 
-func (s *Store) PendingCommands(ctx context.Context, clientUUID string, now time.Time) ([]Command, error) {
-	device, err := s.EnsureDevice(ctx, clientUUID, now)
+// SetDeviceLock sets the persistent lock state for a device. The client reads it
+// from its config on every poll, so lock is a continuous state rather than a
+// one-shot command: the overlay reappears whenever the device is locked.
+func (s *Store) SetDeviceLock(ctx context.Context, deviceID int64, locked bool, message string, now time.Time) error {
+	if !locked {
+		message = ""
+	}
+	result, err := s.db.ExecContext(ctx, `
+UPDATE device_config SET locked = ?, lock_message = ? WHERE device_id = ?`,
+		boolToInt(locked), message, deviceID)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	rows, err := s.db.QueryContext(ctx, `
-SELECT id, device_id, type, status, message, created_at_utc, ack_at_utc
-FROM commands
-WHERE device_id = ? AND status = 'pending'
-ORDER BY created_at_utc ASC, id ASC`, device.ID)
-	if err != nil {
-		return nil, err
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("device %d has no config row", deviceID)
 	}
-	defer rows.Close()
-	return scanCommands(rows)
-}
-
-func (s *Store) AckCommand(ctx context.Context, commandID int64, clientUUID string, now time.Time) (bool, error) {
-	var deviceID int64
-	var err error
-	if strings.TrimSpace(clientUUID) != "" {
-		device, err := s.EnsureDevice(ctx, clientUUID, now)
-		if err != nil {
-			return false, err
-		}
-		deviceID = device.ID
-	}
-
-	query := `UPDATE commands SET status = 'acked', ack_at_utc = ? WHERE id = ?`
-	args := []any{formatDBTime(now), commandID}
-	if deviceID != 0 {
-		query += ` AND device_id = ?`
-		args = append(args, deviceID)
-	}
-	result, err := s.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return false, err
-	}
-	rows, _ := result.RowsAffected()
-	if rows > 0 {
-		return true, nil
-	}
-
-	existsQuery := `SELECT COUNT(*) FROM commands WHERE id = ? AND status = 'acked'`
-	existsArgs := []any{commandID}
-	if deviceID != 0 {
-		existsQuery += ` AND device_id = ?`
-		existsArgs = append(existsArgs, deviceID)
-	}
-	var count int
-	if err := s.db.QueryRowContext(ctx, existsQuery, existsArgs...).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-func (s *Store) CreateCommand(ctx context.Context, deviceID int64, commandType, message string, now time.Time) (int64, error) {
-	if !validCommand(commandType) {
-		return 0, fmt.Errorf("invalid command type %q", commandType)
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-
-	// Keep at most one pending command per device. A new command supersedes any
-	// still-pending command, so an unlock cancels a queued lock and vice versa.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM commands WHERE device_id = ? AND status = 'pending'`, deviceID); err != nil {
-		return 0, err
-	}
-	result, err := tx.ExecContext(ctx, `
-INSERT INTO commands(device_id, type, status, message, created_at_utc)
-VALUES (?, ?, 'pending', ?, ?)`, deviceID, commandType, message, formatDBTime(now))
-	if err != nil {
-		return 0, err
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return id, nil
+	return nil
 }
 
 func (s *Store) Devices(ctx context.Context) ([]Device, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT d.id, d.client_uuid, d.display_name, d.user_id, COALESCE(u.name, ''),
-       d.registration_status, d.created_at_utc, d.last_seen_at_utc
+       d.registration_status, d.created_at_utc, d.last_seen_at_utc,
+       COALESCE(c.locked, 0)
 FROM devices d
 LEFT JOIN users u ON u.id = d.user_id
+LEFT JOIN device_config c ON c.device_id = d.id
 ORDER BY d.display_name COLLATE NOCASE, d.id`)
 	if err != nil {
 		return nil, err
@@ -459,10 +387,18 @@ ORDER BY d.display_name COLLATE NOCASE, d.id`)
 
 	var devices []Device
 	for rows.Next() {
-		device, err := scanDeviceRows(rows)
-		if err != nil {
+		var device Device
+		var userID sql.NullInt64
+		var created, lastSeen string
+		if err := rows.Scan(&device.ID, &device.ClientUUID, &device.DisplayName, &userID, &device.UserName,
+			&device.RegistrationStatus, &created, &lastSeen, &device.Locked); err != nil {
 			return nil, err
 		}
+		if userID.Valid {
+			device.UserID = &userID.Int64
+		}
+		device.CreatedAt = parseDBTime(created)
+		device.LastSeenAt = parseDBTime(lastSeen)
 		devices = append(devices, device)
 	}
 	return devices, rows.Err()
@@ -521,7 +457,6 @@ func (s *Store) DeleteDevice(ctx context.Context, deviceID int64) error {
 	for _, query := range []string{
 		`DELETE FROM events WHERE device_id = ?`,
 		`DELETE FROM device_config WHERE device_id = ?`,
-		`DELETE FROM commands WHERE device_id = ?`,
 		`DELETE FROM devices WHERE id = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, query, deviceID); err != nil {
@@ -620,25 +555,6 @@ func (s *Store) DeleteCategory(ctx context.Context, id int64) error {
 	return err
 }
 
-func (s *Store) RecentCommands(ctx context.Context, limit int) ([]Command, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 50
-	}
-	rows, err := s.db.QueryContext(ctx, `
-SELECT c.id, c.device_id,
-       COALESCE(NULLIF(d.display_name, ''), d.client_uuid) AS device,
-       c.type, c.status, c.message, c.created_at_utc, c.ack_at_utc
-FROM commands c
-JOIN devices d ON d.id = c.device_id
-ORDER BY c.created_at_utc DESC, c.id DESC
-LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanCommands(rows)
-}
-
 func (s *Store) ReportEvents(ctx context.Context, deviceID int64, start, end time.Time) ([]ActivityEvent, error) {
 	var events []ActivityEvent
 	before := s.db.QueryRowContext(ctx, `
@@ -687,54 +603,6 @@ func scanDeviceRow(row *sql.Row) (Device, error) {
 	device.CreatedAt = parseDBTime(created)
 	device.LastSeenAt = parseDBTime(lastSeen)
 	return device, nil
-}
-
-func scanDeviceRows(rows *sql.Rows) (Device, error) {
-	var device Device
-	var userID sql.NullInt64
-	var created, lastSeen string
-	if err := rows.Scan(&device.ID, &device.ClientUUID, &device.DisplayName, &userID, &device.UserName,
-		&device.RegistrationStatus, &created, &lastSeen); err != nil {
-		return Device{}, err
-	}
-	if userID.Valid {
-		device.UserID = &userID.Int64
-	}
-	device.CreatedAt = parseDBTime(created)
-	device.LastSeenAt = parseDBTime(lastSeen)
-	return device, nil
-}
-
-func scanCommands(rows *sql.Rows) ([]Command, error) {
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-	var commands []Command
-	for rows.Next() {
-		var command Command
-		var created string
-		var ack sql.NullString
-		switch len(columns) {
-		case 7:
-			if err := rows.Scan(&command.ID, &command.DeviceID, &command.Type, &command.Status, &command.Message, &created, &ack); err != nil {
-				return nil, err
-			}
-		case 8:
-			if err := rows.Scan(&command.ID, &command.DeviceID, &command.Device, &command.Type, &command.Status, &command.Message, &created, &ack); err != nil {
-				return nil, err
-			}
-		default:
-			return nil, fmt.Errorf("unexpected command column count %d", len(columns))
-		}
-		command.CreatedAt = parseDBTime(created)
-		if ack.Valid {
-			ackAt := parseDBTime(ack.String)
-			command.AckAt = &ackAt
-		}
-		commands = append(commands, command)
-	}
-	return commands, rows.Err()
 }
 
 func scanEventRow(row *sql.Row) (ActivityEvent, error) {

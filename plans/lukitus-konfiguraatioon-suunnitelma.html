@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="fi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rootaika - Lukitus konfiguraatioon + overlay-kovennus</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --text: #1f2933;
+      --muted: #5b6673;
+      --border: #d8dee6;
+      --accent: #0f766e;
+      --accent-soft: #e6f4f1;
+      --warn: #8a5a00;
+      --warn-soft: #fff5d6;
+      --code: #f0f3f7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 48px 24px 72px;
+    }
+
+    header {
+      margin-bottom: 32px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      line-height: 1.05;
+    }
+
+    h2 {
+      margin: 40px 0 14px;
+      font-size: 1.45rem;
+      line-height: 1.25;
+    }
+
+    h3 {
+      margin: 22px 0 8px;
+      font-size: 1.08rem;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    ul,
+    ol {
+      margin: 0 0 16px 1.25rem;
+      padding: 0;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    code {
+      padding: 0.12rem 0.32rem;
+      border-radius: 4px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #101827;
+      color: #eef4ff;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 22px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf2f7;
+      font-weight: 650;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .note {
+      padding: 14px 16px;
+      border: 1px solid #f0d98b;
+      border-radius: 8px;
+      background: var(--warn-soft);
+      color: var(--warn);
+      margin: 0 0 18px;
+    }
+
+    .section {
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      margin-bottom: 18px;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.86rem;
+      font-weight: 650;
+    }
+
+    .file {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      color: var(--accent);
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="pill">Suunnitelma</p>
+      <h1>Lukitus konfiguraatioon</h1>
+      <p>
+        Lukitus siirretään kertaluontoisesta <strong>komennosta</strong> jatkuvaksi
+        <strong>konfiguraatiotilaksi</strong>. Serveri lähettää <code>locked</code>- ja
+        <code>lock_message</code>-kentät konfiguraation mukana, ja client tarkistaa joka
+        config-pollissa pitääkö lukitusoverlay olla päällä. Lisäksi overlay-ikkuna kovennetaan:
+        se piilotetaan Windowsin alt-tab-valinnasta, sen manuaalinen sulkeminen estetään, ja
+        jos prosessi silti kuolee lukitustilan ollessa päällä, service/agent käynnistää sen
+        uudelleen.
+      </p>
+    </header>
+
+    <section class="section" aria-label="Tausta">
+      <h2>Tausta ja tavoite</h2>
+      <p>
+        Nykyinen lukitusoverlay on <strong>kertaluontoinen ja karkaa</strong> kolmesta syystä:
+      </p>
+      <ol>
+        <li>
+          Overlay on erillinen sulkemiskelpoinen PowerShell-ikkuna, joka <strong>näkyy
+          Windowsin alt-tab-valinnassa</strong> ja jonka käyttäjä voi sieltä sulkea.
+        </li>
+        <li>
+          Kun overlay on kerran suljettu, sitä <strong>ei käynnistetä uudelleen</strong> vaikka
+          serverin tila on yhä "lock". <code>Controller.SetLocked</code>
+          (<span class="file">controller_windows.go:64</span>) palaa heti kun
+          <code>c.locked == true</code>, eikä koskaan huomaa että prosessi kuoli.
+        </li>
+        <li>
+          Lukitus välitetään <strong>transientin command-mekanismin</strong> kautta
+          (<code>/api/v1/client/commands</code> + <code>/ack</code>). Komento kuitataan kerran,
+          joten serverin "lock"-tila ei ole jatkuva totuus jota client voisi tarkistaa joka
+          poll-kierroksella.
+        </li>
+      </ol>
+      <p>
+        Tavoite: lukitus on <strong>osa konfiguraatiota</strong> (jatkuva tila, ei kertakomento).
+        Client tarkistaa joka config-pollissa: jos overlay ei ole päällä mutta tila on lukittu,
+        overlay näytetään. Jos overlay on jo päällä, ei tehdä mitään.
+      </p>
+      <h3>Päätökset (vahvistettu)</h3>
+      <ul>
+        <li>
+          <strong>Command-mekanismi poistetaan kokonaan.</strong> Yksi totuuden lähde, ei kahta
+          kilpailevaa lukituspolkua.
+        </li>
+        <li>
+          <strong>Overlay kovennetaan + relaunch.</strong> Käyttäjä ei näe työpöytää välissä.
+        </li>
+      </ul>
+    </section>
+
+    <section class="section" aria-label="Datamalli">
+      <h2>Datamalli: lukitus per-device-konfiguraatioon</h2>
+      <p>
+        Lukitus on per-device, joten se kuuluu <code>device_config</code>-tauluun (vrt.
+        <code>max_countable_gap_seconds</code>, joka on globaali ja kuuluu
+        <code>settings</code>-tauluun). Lisätään kaksi saraketta:
+      </p>
+      <ul>
+        <li><code>locked INTEGER NOT NULL DEFAULT 0</code></li>
+        <li><code>lock_message TEXT NOT NULL DEFAULT ''</code></li>
+      </ul>
+      <p>
+        Sarakkeet lisätään olemassa olevalla <code>ensureColumn</code>-mekanismilla
+        (<span class="file">store.go:128</span>), jotta vanhat kannat saavat ne ilman
+        migraatioskriptiä. <code>commands</code>-taulu ja sen indeksi poistetaan kokonaan.
+      </p>
+    </section>
+
+    <section class="section" aria-label="Server-muutokset">
+      <h2>Server (<span class="file">server/internal/rootaika</span>)</h2>
+      <h3>Skeema + store (<span class="file">store.go</span>)</h3>
+      <ul>
+        <li>
+          Lisää <code>device_config</code>-tauluun <code>locked</code> ja
+          <code>lock_message</code> -sarakkeet <code>ensureColumn</code>-kutsuilla
+          <code>migrate</code>-funktion lopussa.
+        </li>
+        <li>
+          <code>ClientConfig</code>-kysely (<span class="file">store.go:336</span>) lukee
+          <code>locked</code>/<code>lock_message</code> <code>device_config</code>-taulusta.
+        </li>
+        <li>
+          <strong>Uusi</strong> <code>SetDeviceLock(ctx, deviceID, locked, message, now)</code>:
+          päivittää <code>device_config.locked</code>/<code>lock_message</code>. Korvaa
+          <code>CreateCommand</code>-kutsun admin-poluissa.
+        </li>
+        <li>
+          <code>UpdateSettings</code>-massapäivitys (<span class="file">store.go:567</span>) EI
+          koske lock-sarakkeisiin (lock on per-device).
+        </li>
+        <li>
+          <strong>Poista:</strong> <code>commands</code>-taulu + indeksi,
+          <code>PendingCommands</code>, <code>AckCommand</code>, <code>CreateCommand</code>,
+          <code>RecentCommands</code>, <code>scanCommands</code>, ja
+          <code>DeleteDevice</code>:n <code>DELETE FROM commands</code> -rivi.
+        </li>
+      </ul>
+      <h3>Mallit (<span class="file">models.go</span>)</h3>
+      <ul>
+        <li>
+          Lisää <code>ClientConfig</code>:iin <code>Locked bool</code> ja
+          <code>LockMessage string</code>.
+        </li>
+        <li>
+          Poista <code>CommandLock</code>/<code>CommandUnlock</code>/
+          <code>CommandStatusPending</code>/<code>CommandStatusAcked</code> -vakiot,
+          <code>Command</code>-struct, <code>validCommand</code>. <code>StateLocked</code> säilyy
+          (eventeissä yhä käytössä).
+        </li>
+      </ul>
+      <h3>Handlerit + reititys (<span class="file">handlers.go</span>, <span class="file">app.go</span>)</h3>
+      <ul>
+        <li>
+          <code>handleClientConfig</code>: lisää JSON-vastaukseen <code>"locked"</code> ja
+          <code>"lock_message"</code>.
+        </li>
+        <li>
+          <code>adminDeviceCommand</code>: korvaa <code>CreateCommand</code> &rarr;
+          <code>SetDeviceLock(deviceID, action == "lock", message, now)</code>. Lock/unlock
+          dispatch-rivi ja admin-formit säilyvät ennallaan.
+        </li>
+        <li>
+          <strong>Poista</strong> <code>handleClientCommands</code>,
+          <code>handleCommandAck</code>, <code>isCommandAckPath</code>,
+          <code>commandIDFromAckPath</code>, ja niiden reititysrivit
+          (<span class="file">app.go:40-43</span>).
+        </li>
+      </ul>
+      <h3>Admin-UI (<span class="file">views.go</span>)</h3>
+      <ul>
+        <li>
+          Laitteen lock-tila luetaan suoraan <code>device_config.locked</code>:sta
+          device-loopissa, ei command-historiasta. Näytä "lukittu"/"avattu" device-kortissa.
+        </li>
+        <li>
+          Poista <code>#commands</code>-osio ja nav-linkki "Komennot",
+          <code>RecentCommands</code>-kutsu ja <code>Commands</code>-kenttä
+          <code>dashboardData</code>:sta, sekä command-pohjainen <code>lockState</code>-helper.
+        </li>
+      </ul>
+    </section>
+
+    <section class="section" aria-label="Client-muutokset">
+      <h2>Client (<span class="file">client-windows</span>)</h2>
+      <h3>Konfiguraatio (<span class="file">internal/model/model.go</span>, <span class="file">internal/config/config.go</span>)</h3>
+      <ul>
+        <li>
+          <code>model.ClientConfig</code>: lisää <code>Locked *bool</code> ja
+          <code>LockMessage string</code>. Pointteri erottaa "ei kentässä" ja "false", samoin
+          kuin <code>DebugMode</code>.
+        </li>
+        <li>
+          <code>config.ApplyServerConfig</code>: sovita lock serveriltä. Lock EROAA muista
+          kentistä &mdash; se pitää voida asettaa <strong>takaisin falseen</strong>: jos
+          <code>sc.Locked != nil</code> ja <code>c.Locked != *sc.Locked</code>, päivitä ja merkitse
+          <code>changed=true</code>. <code>LockMessage</code> päivitetään lock-tilan mukana.
+        </li>
+        <li>
+          Poista <code>model.Command</code>, <code>CommandType</code>,
+          <code>CommandLock</code>/<code>Unlock</code>, <code>CommandsResponse</code>,
+          <code>Command.Identifier</code>.
+        </li>
+      </ul>
+      <h3>API-client (<span class="file">internal/api/client.go</span>)</h3>
+      <ul>
+        <li>Poista <code>FetchCommands</code>, <code>AckCommand</code>.</li>
+        <li>
+          Retry/backoff-testit käyttävät nyt <code>FetchCommands</code> ajurinaan &rarr; vaihda
+          ne käyttämään <code>FetchConfig</code>:ia.
+        </li>
+      </ul>
+      <h3>Service (<span class="file">internal/serviceapp/app.go</span>)</h3>
+      <ul>
+        <li>
+          <code>pollOnce</code>: poista <code>FetchCommands</code>/<code>handleCommand</code>/
+          <code>AckCommand</code>-lohko. Lock tulee nyt <code>ApplyServerConfig</code>:n kautta,
+          joka kirjoittaa <code>cfg.Locked</code>/<code>cfg.LockMessage</code> jo olemassa olevassa
+          <code>store.update</code>-kutsussa.
+        </li>
+        <li>Poista <code>handleCommand</code>.</li>
+        <li>
+          <code>/agent/state</code> jakaa jo <code>cfg.Locked</code>/<code>cfg.LockMessage</code>
+          agentille &mdash; säilyy ennallaan.
+        </li>
+      </ul>
+    </section>
+
+    <section class="section" aria-label="Overlay-kovennus">
+      <h2>Overlay-ikkunan kovennus + relaunch (<span class="file">internal/lock/controller_windows.go</span>)</h2>
+      <ul>
+        <li>
+          <strong>Piilota alt-tabista:</strong> lisää overlay-ikkunalle
+          <code>WS_EX_TOOLWINDOW</code> extended-tyyli (P/Invoke
+          <code>SetWindowLong</code>/<code>GetWindowLong</code>, <code>GWL_EXSTYLE</code>,
+          <code>0x80</code>). ToolWindow poistaa ikkunan alt-tab-listalta.
+        </li>
+        <li>
+          <strong>Estä manuaalinen sulkeminen:</strong>
+          <code>$form.Add_FormClosing({ $_.Cancel = $true })</code>. Service sulkee yhä overlayn
+          <code>Process.Kill</code>-kutsulla (ohittaa FormClosingin), joten unlock toimii.
+        </li>
+        <li>
+          <strong>Relaunch backstop:</strong> Controller-tilaan <code>exited bool</code> -lippu,
+          jonka <code>cmd.Wait()</code>-goroutine asettaa (vain jos kyseessä on yhä sama
+          prosessi). <code>SetLocked(locked=true)</code> tekee early-returnin VAIN jos
+          <code>c.locked &amp;&amp; c.cmd != nil &amp;&amp; !c.exited &amp;&amp; c.message == message</code>.
+          Jos prosessi kuoli, overlay käynnistetään uudelleen. Agent kutsuu
+          <code>SetLocked</code> joka observe-välillä (~5 s), joten kuollut overlay palautuu
+          sekunneissa.
+        </li>
+        <li><code>controller_other.go</code>: ei muutoksia (no-op stub).</li>
+      </ul>
+      <div class="note">
+        <strong>Huom:</strong> Windows-spesifit tiedostot (<code>*_windows.go</code>) eivät käänny
+        Linux-CI:ssä. <code>controller_windows.go</code>:n käytös todennetaan käsin Windowsilla
+        (CLAUDE.md-konventio).
+      </div>
+    </section>
+
+    <section class="section" aria-label="Todennus">
+      <h2>Todennus</h2>
+      <ul>
+        <li>
+          <strong>Server-yksikkötestit</strong> (<code>go test -race -cover ./...</code>):
+          <code>SetDeviceLock</code> persistoi lock-tilan <code>device_config</code>:iin,
+          <code>handleClientConfig</code> palauttaa <code>locked</code>/<code>lock_message</code>
+          JSONissa, admin lock/unlock päivittää <code>device_config</code>:in. Command-testit
+          poistettu.
+        </li>
+        <li>
+          <strong>Client-yksikkötestit</strong>: <code>ApplyServerConfig</code> lukitsee ja avaa
+          cfg:n serverin configista; FetchCommands/AckCommand-testit poistettu, retry-testit
+          käyttävät <code>FetchConfig</code>:ia.
+        </li>
+        <li>
+          <strong>Cross-compile:</strong> <code>GOOS=windows go build ./...</code>
+          client-windows/:ssa.
+        </li>
+        <li>
+          <strong>Manuaalinen Windows-testi:</strong>
+          <ol>
+            <li>Admin-UI &rarr; Lock laitteelle viestillä &rarr; overlay ilmestyy seuraavalla
+              config-pollilla.</li>
+            <li>Yritä alt-tab &rarr; overlay EI näy listassa. Yritä Alt-F4 &rarr; ei sulkeudu.</li>
+            <li>Tapa overlay-prosessi Task Managerista &rarr; palautuu ~5 s sisällä (tila yhä
+              lock).</li>
+            <li>Admin-UI &rarr; Unlock &rarr; overlay katoaa seuraavalla config-pollilla.</li>
+          </ol>
+        </li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

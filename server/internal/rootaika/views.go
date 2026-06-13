@@ -17,7 +17,6 @@ type dashboardData struct {
 	Users      []User
 	Settings   Settings
 	Categories []ProgramCategory
-	Commands   []Command
 }
 
 type deviceView struct {
@@ -70,20 +69,9 @@ func (a *App) dashboardData(r *http.Request, role Role) (dashboardData, error) {
 	if err != nil {
 		return dashboardData{}, err
 	}
-	commands, err := a.store.RecentCommands(ctx, 50)
-	if err != nil {
-		return dashboardData{}, err
-	}
 	categories, err := a.store.Categories(ctx)
 	if err != nil {
 		return dashboardData{}, err
-	}
-
-	latestCommandByDevice := map[int64]Command{}
-	for _, command := range commands {
-		if _, ok := latestCommandByDevice[command.DeviceID]; !ok {
-			latestCommandByDevice[command.DeviceID] = command
-		}
 	}
 
 	deviceViews := make([]deviceView, 0, len(devices))
@@ -97,7 +85,7 @@ func (a *App) dashboardData(r *http.Request, role Role) (dashboardData, error) {
 			Device:       device,
 			TotalSeconds: report.TotalSeconds,
 			Processes:    processViews(report.ByProcess),
-			LockState:    lockState(latestCommandByDevice[device.ID]),
+			LockState:    lockState(device.Locked),
 		}
 		deviceViews = append(deviceViews, view)
 	}
@@ -111,7 +99,6 @@ func (a *App) dashboardData(r *http.Request, role Role) (dashboardData, error) {
 		Users:      users,
 		Settings:   settings,
 		Categories: categories,
-		Commands:   commands,
 	}, nil
 }
 
@@ -129,20 +116,11 @@ func processViews(byProcess map[string]int64) []processView {
 	return processes
 }
 
-func lockState(command Command) string {
-	if command.ID == 0 {
-		return "ei komentoa"
-	}
-	if command.Status == CommandStatusPending {
-		return command.Type + " odottaa"
-	}
-	if command.Type == CommandLock {
+func lockState(locked bool) string {
+	if locked {
 		return "lukittu"
 	}
-	if command.Type == CommandUnlock {
-		return "avattu"
-	}
-	return command.Status
+	return "avattu"
 }
 
 func humanSeconds(seconds int64) string {
@@ -252,7 +230,6 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
         <a href="#devices">Laitteet</a>
         <a href="#users">Käyttäjät</a>
         <a href="#settings">Asetukset</a>
-        <a href="#commands">Komennot</a>
       </nav>
     </header>
 
@@ -377,15 +354,6 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
       {{end}}
     </section>
 
-    <section id="commands">
-      <h2>Komennot</h2>
-      <table class="compact">
-        <thead><tr><th>ID</th><th>Laite</th><th>Tyyppi</th><th>Status</th><th>Luotu</th><th>Ack</th></tr></thead>
-        <tbody>
-        {{range .Commands}}<tr><td>{{.ID}}</td><td>{{.Device}}</td><td>{{.Type}}</td><td>{{.Status}}</td><td>{{formatTime .CreatedAt}}</td><td>{{formatTimePtr .AckAt}}</td></tr>{{else}}<tr><td colspan="6" class="muted">Ei komentoja.</td></tr>{{end}}
-        </tbody>
-      </table>
-    </section>
   </main>
 </body>
 </html>`))

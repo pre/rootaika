@@ -45,6 +45,51 @@ func TestApplyServerConfigDebugMode(t *testing.T) {
 	})
 }
 
+func TestApplyServerConfigLock(t *testing.T) {
+	t.Run("nil leaves unchanged", func(t *testing.T) {
+		cfg := &Config{Locked: true, LockMessage: "Aika lopettaa"}
+		if changed := cfg.ApplyServerConfig(model.ClientConfig{}); changed {
+			t.Fatalf("nil Locked should not report change")
+		}
+		if !cfg.Locked || cfg.LockMessage != "Aika lopettaa" {
+			t.Fatalf("nil Locked must not modify the value: %+v", cfg)
+		}
+	})
+	t.Run("true sets with message", func(t *testing.T) {
+		cfg := &Config{}
+		if changed := cfg.ApplyServerConfig(model.ClientConfig{Locked: boolPtr(true), LockMessage: "Aika lopettaa"}); !changed {
+			t.Fatalf("setting Locked true should report change")
+		}
+		if !cfg.Locked || cfg.LockMessage != "Aika lopettaa" {
+			t.Fatalf("lock was not applied: %+v", cfg)
+		}
+	})
+	t.Run("false clears message", func(t *testing.T) {
+		cfg := &Config{Locked: true, LockMessage: "Aika lopettaa"}
+		if changed := cfg.ApplyServerConfig(model.ClientConfig{Locked: boolPtr(false), LockMessage: "stale"}); !changed {
+			t.Fatalf("clearing Locked should report change")
+		}
+		if cfg.Locked || cfg.LockMessage != "" {
+			t.Fatalf("unlock did not clear state: %+v", cfg)
+		}
+	})
+	t.Run("same locked state with same message no change", func(t *testing.T) {
+		cfg := &Config{Locked: true, LockMessage: "Aika lopettaa"}
+		if changed := cfg.ApplyServerConfig(model.ClientConfig{Locked: boolPtr(true), LockMessage: "Aika lopettaa"}); changed {
+			t.Fatalf("identical lock state should not report change")
+		}
+	})
+	t.Run("same locked state new message updates", func(t *testing.T) {
+		cfg := &Config{Locked: true, LockMessage: "Aika lopettaa"}
+		if changed := cfg.ApplyServerConfig(model.ClientConfig{Locked: boolPtr(true), LockMessage: "Nyt riittää"}); !changed {
+			t.Fatalf("changed lock message should report change")
+		}
+		if cfg.LockMessage != "Nyt riittää" {
+			t.Fatalf("message was not updated: %q", cfg.LockMessage)
+		}
+	})
+}
+
 func TestApplyEnvOverrides(t *testing.T) {
 	t.Setenv("ROOTAIKA_SERVER_URL", "http://override.test")
 	t.Setenv("ROOTAIKA_CLIENT_USERNAME", "envuser")

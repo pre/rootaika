@@ -37,10 +37,6 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleEventsBatch(w, r)
 	case r.URL.Path == "/api/v1/client/config":
 		a.handleClientConfig(w, r)
-	case r.URL.Path == "/api/v1/client/commands":
-		a.handleClientCommands(w, r)
-	case isCommandAckPath(r.URL.Path):
-		a.handleCommandAck(w, r)
 	case stringsHasPrefix(r.URL.Path, "/admin/"):
 		a.handleAdmin(w, r)
 	default:

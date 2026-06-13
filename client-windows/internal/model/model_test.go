@@ -20,15 +20,3 @@ func TestActivityStateValid(t *testing.T) {
 		}
 	}
 }
-
-func TestCommandIdentifier(t *testing.T) {
-	if got := (Command{CommandID: "cmd-1", ID: "id-1"}).Identifier(); got != "cmd-1" {
-		t.Fatalf("Identifier prefers CommandID, got %q", got)
-	}
-	if got := (Command{ID: "id-1"}).Identifier(); got != "id-1" {
-		t.Fatalf("Identifier falls back to ID, got %q", got)
-	}
-	if got := (Command{}).Identifier(); got != "" {
-		t.Fatalf("empty command Identifier should be empty, got %q", got)
-	}
-}

@@ -20,23 +20,6 @@ func TestValidState(t *testing.T) {
 	}
 }
 
-func TestValidCommand(t *testing.T) {
-	tests := []struct {
-		command string
-		want    bool
-	}{
-		{command: CommandLock, want: true},
-		{command: CommandUnlock, want: true},
-		{command: "explode", want: false},
-		{command: "", want: false},
-	}
-	for _, tt := range tests {
-		if got := validCommand(tt.command); got != tt.want {
-			t.Fatalf("validCommand(%q) = %v want %v", tt.command, got, tt.want)
-		}
-	}
-}
-
 func TestNewAppDefaults(t *testing.T) {
 	store := testStore(t)
 	app := NewApp(store)

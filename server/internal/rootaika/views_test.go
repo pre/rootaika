@@ -32,23 +32,11 @@ func TestHumanSeconds(t *testing.T) {
 }
 
 func TestLockState(t *testing.T) {
-	tests := []struct {
-		name    string
-		command Command
-		want    string
-	}{
-		{name: "no command", command: Command{}, want: "ei komentoa"},
-		{name: "pending", command: Command{ID: 1, Type: CommandLock, Status: CommandStatusPending}, want: "lock odottaa"},
-		{name: "lock acked", command: Command{ID: 1, Type: CommandLock, Status: CommandStatusAcked}, want: "lukittu"},
-		{name: "unlock acked", command: Command{ID: 1, Type: CommandUnlock, Status: CommandStatusAcked}, want: "avattu"},
-		{name: "other status", command: Command{ID: 1, Type: "noop", Status: "weird"}, want: "weird"},
+	if got := lockState(true); got != "lukittu" {
+		t.Fatalf("lockState(true) = %q want %q", got, "lukittu")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := lockState(tt.command); got != tt.want {
-				t.Fatalf("lockState = %q want %q", got, tt.want)
-			}
-		})
+	if got := lockState(false); got != "avattu" {
+		t.Fatalf("lockState(false) = %q want %q", got, "avattu")
 	}
 }
 

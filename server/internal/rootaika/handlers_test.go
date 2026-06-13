@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,14 +87,16 @@ func TestEventsBatchStoresEventsAndDeduplicates(t *testing.T) {
 	}
 }
 
-func TestAdminCreatesCommandAndClientAcks(t *testing.T) {
+func TestAdminLockReflectsInClientConfig(t *testing.T) {
 	app := testApp(t)
 	device, err := app.store.EnsureDevice(context.Background(), "client-1", app.now())
 	if err != nil {
 		t.Fatalf("ensure device: %v", err)
 	}
 
-	lock := httptest.NewRequest(http.MethodPost, "/admin/devices/"+strconvInt(device.ID)+"/lock", nil)
+	lock := httptest.NewRequest(http.MethodPost, "/admin/devices/"+strconvInt(device.ID)+"/lock",
+		strings.NewReader("message=Aika+lopettaa"))
+	lock.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	lock.SetBasicAuth("admin", "admin")
 	lockRecorder := httptest.NewRecorder()
 	app.ServeHTTP(lockRecorder, lock)
@@ -101,33 +104,40 @@ func TestAdminCreatesCommandAndClientAcks(t *testing.T) {
 		t.Fatalf("lock status = %d", lockRecorder.Code)
 	}
 
-	commandsRequest := httptest.NewRequest(http.MethodGet, "/api/v1/client/commands?client_id=client-1", nil)
-	commandsRequest.SetBasicAuth("client", "client")
-	commandsRecorder := httptest.NewRecorder()
-	app.ServeHTTP(commandsRecorder, commandsRequest)
-	if commandsRecorder.Code != http.StatusOK {
-		t.Fatalf("commands status = %d body=%s", commandsRecorder.Code, commandsRecorder.Body.String())
-	}
-	var commandResponse struct {
-		Commands []struct {
-			ID   int64  `json:"id"`
-			Type string `json:"type"`
-		} `json:"commands"`
-	}
-	if err := json.Unmarshal(commandsRecorder.Body.Bytes(), &commandResponse); err != nil {
-		t.Fatalf("decode commands: %v", err)
-	}
-	if len(commandResponse.Commands) != 1 || commandResponse.Commands[0].Type != CommandLock {
-		t.Fatalf("commands = %+v", commandResponse.Commands)
+	if locked, message := clientConfigLock(t, app); !locked || message != "Aika lopettaa" {
+		t.Fatalf("after lock: locked=%v message=%q", locked, message)
 	}
 
-	ack := httptest.NewRequest(http.MethodPost, "/api/v1/client/commands/"+strconvInt(commandResponse.Commands[0].ID)+"/ack?client_id=client-1", nil)
-	ack.SetBasicAuth("client", "client")
-	ackRecorder := httptest.NewRecorder()
-	app.ServeHTTP(ackRecorder, ack)
-	if ackRecorder.Code != http.StatusOK {
-		t.Fatalf("ack status = %d body=%s", ackRecorder.Code, ackRecorder.Body.String())
+	unlock := httptest.NewRequest(http.MethodPost, "/admin/devices/"+strconvInt(device.ID)+"/unlock", nil)
+	unlock.SetBasicAuth("admin", "admin")
+	unlockRecorder := httptest.NewRecorder()
+	app.ServeHTTP(unlockRecorder, unlock)
+	if unlockRecorder.Code != http.StatusSeeOther {
+		t.Fatalf("unlock status = %d", unlockRecorder.Code)
 	}
+
+	if locked, message := clientConfigLock(t, app); locked || message != "" {
+		t.Fatalf("after unlock: locked=%v message=%q", locked, message)
+	}
+}
+
+func clientConfigLock(t *testing.T, app *App) (bool, string) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/client/config?client_id=client-1", nil)
+	request.SetBasicAuth("client", "client")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("config status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Locked      bool   `json:"locked"`
+		LockMessage string `json:"lock_message"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	return response.Locked, response.LockMessage
 }
 
 func strconvInt(value int64) string {

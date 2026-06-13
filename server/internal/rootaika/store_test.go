@@ -249,174 +249,74 @@ func TestClientConfigDebugsUnassignedClientsWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestPendingCommandsOnlyReturnsPending(t *testing.T) {
+func TestSetDeviceLockPersistsInConfig(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	id, err := store.CreateCommand(ctx, device.ID, CommandLock, "", fixedNow())
-	if err != nil {
-		t.Fatalf("create command: %v", err)
-	}
 
-	pending, err := store.PendingCommands(ctx, "client-1", fixedNow())
+	if err := store.SetDeviceLock(ctx, device.ID, true, "Aika lopettaa", fixedNow()); err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	config, err := store.ClientConfig(ctx, "client-1", fixedNow())
 	if err != nil {
-		t.Fatalf("pending: %v", err)
+		t.Fatalf("config: %v", err)
 	}
-	if len(pending) != 1 || pending[0].ID != id {
-		t.Fatalf("pending = %+v", pending)
-	}
-
-	if _, err := store.AckCommand(ctx, id, "client-1", fixedNow()); err != nil {
-		t.Fatalf("ack: %v", err)
-	}
-	pending, err = store.PendingCommands(ctx, "client-1", fixedNow())
-	if err != nil {
-		t.Fatalf("pending after ack: %v", err)
-	}
-	if len(pending) != 0 {
-		t.Fatalf("pending after ack = %+v", pending)
+	if !config.Locked || config.LockMessage != "Aika lopettaa" {
+		t.Fatalf("config = %+v, want locked with message", config)
 	}
 }
 
-func TestCreateCommandStoresMessage(t *testing.T) {
+func TestSetDeviceLockUnlockClearsMessage(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if _, err := store.CreateCommand(ctx, device.ID, CommandLock, "Aika lopettaa", fixedNow()); err != nil {
-		t.Fatalf("create command: %v", err)
-	}
 
-	pending, err := store.PendingCommands(ctx, "client-1", fixedNow())
-	if err != nil {
-		t.Fatalf("pending: %v", err)
+	if err := store.SetDeviceLock(ctx, device.ID, true, "Aika lopettaa", fixedNow()); err != nil {
+		t.Fatalf("lock: %v", err)
 	}
-	if len(pending) != 1 || pending[0].Message != "Aika lopettaa" {
-		t.Fatalf("pending = %+v", pending)
+	if err := store.SetDeviceLock(ctx, device.ID, false, "", fixedNow()); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	config, err := store.ClientConfig(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	if config.Locked || config.LockMessage != "" {
+		t.Fatalf("config = %+v, want unlocked with empty message", config)
 	}
 }
 
-func TestCreateCommandSupersedesPending(t *testing.T) {
+func TestSetDeviceLockUnknownDevice(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
-	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
-	if err != nil {
-		t.Fatalf("ensure: %v", err)
-	}
-
-	if _, err := store.CreateCommand(ctx, device.ID, CommandLock, "", fixedNow()); err != nil {
-		t.Fatalf("create lock: %v", err)
-	}
-	// A second lock must not stack up another pending command.
-	if _, err := store.CreateCommand(ctx, device.ID, CommandLock, "", fixedNow()); err != nil {
-		t.Fatalf("create lock again: %v", err)
-	}
-	// An unlock supersedes the queued lock.
-	unlockID, err := store.CreateCommand(ctx, device.ID, CommandUnlock, "", fixedNow())
-	if err != nil {
-		t.Fatalf("create unlock: %v", err)
-	}
-
-	pending, err := store.PendingCommands(ctx, "client-1", fixedNow())
-	if err != nil {
-		t.Fatalf("pending: %v", err)
-	}
-	if len(pending) != 1 || pending[0].ID != unlockID || pending[0].Type != CommandUnlock {
-		t.Fatalf("pending = %+v, want single unlock id=%d", pending, unlockID)
+	if err := store.SetDeviceLock(ctx, 99999, true, "", fixedNow()); err == nil {
+		t.Fatalf("expected error for unknown device")
 	}
 }
 
-func TestCreateCommandKeepsAckedHistory(t *testing.T) {
+func TestDevicesReportLockState(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-
-	lockID, err := store.CreateCommand(ctx, device.ID, CommandLock, "", fixedNow())
-	if err != nil {
-		t.Fatalf("create lock: %v", err)
-	}
-	if _, err := store.AckCommand(ctx, lockID, "client-1", fixedNow()); err != nil {
-		t.Fatalf("ack: %v", err)
-	}
-	// Superseding only removes pending commands; acked history survives.
-	if _, err := store.CreateCommand(ctx, device.ID, CommandUnlock, "", fixedNow()); err != nil {
-		t.Fatalf("create unlock: %v", err)
+	if err := store.SetDeviceLock(ctx, device.ID, true, "", fixedNow()); err != nil {
+		t.Fatalf("lock: %v", err)
 	}
 
-	all, err := store.RecentCommands(ctx, 10)
+	devices, err := store.Devices(ctx)
 	if err != nil {
-		t.Fatalf("commands: %v", err)
+		t.Fatalf("devices: %v", err)
 	}
-	if len(all) != 2 {
-		t.Fatalf("commands = %+v, want lock(acked)+unlock(pending)", all)
-	}
-}
-
-func TestAckCommandSuccessAndIdempotent(t *testing.T) {
-	store := testStore(t)
-	ctx := context.Background()
-	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
-	if err != nil {
-		t.Fatalf("ensure: %v", err)
-	}
-	id, err := store.CreateCommand(ctx, device.ID, CommandLock, "", fixedNow())
-	if err != nil {
-		t.Fatalf("create command: %v", err)
-	}
-
-	ok, err := store.AckCommand(ctx, id, "client-1", fixedNow())
-	if err != nil || !ok {
-		t.Fatalf("first ack ok=%v err=%v", ok, err)
-	}
-	ok, err = store.AckCommand(ctx, id, "client-1", fixedNow())
-	if err != nil || !ok {
-		t.Fatalf("idempotent ack ok=%v err=%v", ok, err)
-	}
-
-	// Unknown command id returns false.
-	ok, err = store.AckCommand(ctx, 99999, "client-1", fixedNow())
-	if err != nil {
-		t.Fatalf("ack unknown err: %v", err)
-	}
-	if ok {
-		t.Fatalf("ack unknown should be false")
-	}
-}
-
-func TestAckCommandWithoutClientID(t *testing.T) {
-	store := testStore(t)
-	ctx := context.Background()
-	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
-	if err != nil {
-		t.Fatalf("ensure: %v", err)
-	}
-	id, err := store.CreateCommand(ctx, device.ID, CommandUnlock, "", fixedNow())
-	if err != nil {
-		t.Fatalf("create command: %v", err)
-	}
-	ok, err := store.AckCommand(ctx, id, "", fixedNow())
-	if err != nil || !ok {
-		t.Fatalf("ack without client ok=%v err=%v", ok, err)
-	}
-}
-
-func TestCreateCommandRejectsInvalidType(t *testing.T) {
-	store := testStore(t)
-	ctx := context.Background()
-	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
-	if err != nil {
-		t.Fatalf("ensure: %v", err)
-	}
-	if _, err := store.CreateCommand(ctx, device.ID, "explode", "", fixedNow()); err == nil {
-		t.Fatalf("expected error for invalid command type")
+	if len(devices) != 1 || !devices[0].Locked {
+		t.Fatalf("devices = %+v, want one locked device", devices)
 	}
 }
 
@@ -505,8 +405,8 @@ func TestDeleteDeviceRemovesDeviceAndRelatedRows(t *testing.T) {
 	}, fixedNow()); err != nil {
 		t.Fatalf("insert events: %v", err)
 	}
-	if _, err := store.CreateCommand(ctx, device.ID, CommandLock, "", fixedNow()); err != nil {
-		t.Fatalf("create command: %v", err)
+	if err := store.SetDeviceLock(ctx, device.ID, true, "", fixedNow()); err != nil {
+		t.Fatalf("set device lock: %v", err)
 	}
 
 	if err := store.DeleteDevice(ctx, device.ID); err != nil {
@@ -524,7 +424,6 @@ func TestDeleteDeviceRemovesDeviceAndRelatedRows(t *testing.T) {
 	for table, query := range map[string]string{
 		"events":        `SELECT COUNT(*) FROM events WHERE device_id = ?`,
 		"device_config": `SELECT COUNT(*) FROM device_config WHERE device_id = ?`,
-		"commands":      `SELECT COUNT(*) FROM commands WHERE device_id = ?`,
 	} {
 		var count int
 		if err := store.db.QueryRowContext(ctx, query, device.ID).Scan(&count); err != nil {
@@ -611,32 +510,6 @@ func TestCategoriesCreateValidateAndDelete(t *testing.T) {
 	}
 	if len(categories) != 0 {
 		t.Fatalf("categories after delete = %d", len(categories))
-	}
-}
-
-func TestRecentCommandsIncludesDeviceName(t *testing.T) {
-	store := testStore(t)
-	ctx := context.Background()
-	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
-	if err != nil {
-		t.Fatalf("ensure: %v", err)
-	}
-	if _, err := store.CreateCommand(ctx, device.ID, CommandLock, "", fixedNow()); err != nil {
-		t.Fatalf("create command: %v", err)
-	}
-
-	// limit clamping branch: zero -> 50.
-	commands, err := store.RecentCommands(ctx, 0)
-	if err != nil {
-		t.Fatalf("recent commands: %v", err)
-	}
-	if len(commands) != 1 || commands[0].Device == "" {
-		t.Fatalf("recent commands = %+v", commands)
-	}
-
-	// out-of-range limit also clamps.
-	if _, err := store.RecentCommands(ctx, 9999); err != nil {
-		t.Fatalf("recent commands clamp: %v", err)
 	}
 }
 

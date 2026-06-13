@@ -164,50 +164,6 @@ func TestHandleClientConfigDebugsUnassignedClient(t *testing.T) {
 	}
 }
 
-func TestHandleClientCommandsEmpty(t *testing.T) {
-	app := testApp(t)
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/client/commands?client_id=client-1", nil)
-	request.SetBasicAuth("client", "client")
-	recorder := httptest.NewRecorder()
-	app.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("commands status = %d", recorder.Code)
-	}
-}
-
-func TestHandleCommandAckUnknownCommand(t *testing.T) {
-	app := testApp(t)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/client/commands/424242/ack?client_id=client-1", nil)
-	request.SetBasicAuth("client", "client")
-	recorder := httptest.NewRecorder()
-	app.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("ack unknown status = %d", recorder.Code)
-	}
-}
-
-func TestHandleCommandAckReadsClientIDFromBody(t *testing.T) {
-	app := testApp(t)
-	ctx := context.Background()
-	device, err := app.store.EnsureDevice(ctx, "client-1", app.now())
-	if err != nil {
-		t.Fatalf("ensure device: %v", err)
-	}
-	id, err := app.store.CreateCommand(ctx, device.ID, CommandLock, "", app.now())
-	if err != nil {
-		t.Fatalf("create command: %v", err)
-	}
-
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/client/commands/"+strconvInt(id)+"/ack", strings.NewReader(`{"client_id":"client-1"}`))
-	request.Header.Set("Content-Type", "application/json")
-	request.SetBasicAuth("client", "client")
-	recorder := httptest.NewRecorder()
-	app.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("ack via body status = %d body=%s", recorder.Code, recorder.Body.String())
-	}
-}
-
 func TestHandleEventsBatchRejectsInvalidJSON(t *testing.T) {
 	app := testApp(t)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/events/batch", strings.NewReader(`{not json`))
@@ -227,17 +183,6 @@ func TestHandleEventsBatchRejectsInvalidPayload(t *testing.T) {
 	app.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("invalid payload status = %d", recorder.Code)
-	}
-}
-
-func TestHandleCommandAckBadPath(t *testing.T) {
-	app := testApp(t)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/client/commands/not-a-number/ack", nil)
-	request.SetBasicAuth("client", "client")
-	recorder := httptest.NewRecorder()
-	app.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("ack bad path status = %d", recorder.Code)
 	}
 }
 
@@ -464,28 +409,11 @@ func TestCheckboxForm(t *testing.T) {
 	}
 }
 
-func TestCommandAckPathHelpers(t *testing.T) {
-	if !isCommandAckPath("/api/v1/client/commands/5/ack") {
-		t.Fatalf("valid ack path not recognized")
-	}
-	if isCommandAckPath("/api/v1/client/commands/5") {
-		t.Fatalf("non-ack path wrongly recognized")
-	}
-	id, err := commandIDFromAckPath("/api/v1/client/commands/77/ack")
-	if err != nil || id != 77 {
-		t.Fatalf("commandIDFromAckPath = %d err=%v", id, err)
-	}
-	if _, err := commandIDFromAckPath("/api/v1/client/commands/x/ack"); err == nil {
-		t.Fatalf("expected parse error")
-	}
-}
-
 func TestMethodNotAllowedBranches(t *testing.T) {
 	app := testApp(t)
 	tests := []string{
 		"/api/v1/events/batch",
 		"/api/v1/client/config",
-		"/api/v1/client/commands",
 	}
 	for _, path := range tests {
 		request := httptest.NewRequest(http.MethodDelete, path, nil)

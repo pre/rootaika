@@ -155,6 +155,22 @@ func (c *Config) ApplyServerConfig(sc model.ClientConfig) bool {
 		c.DebugMode = *sc.DebugMode
 		changed = true
 	}
+	// Lock is a continuous state, not a one-shot command, so it must be settable
+	// back to false. The message follows the lock state.
+	if sc.Locked != nil {
+		if c.Locked != *sc.Locked {
+			c.Locked = *sc.Locked
+			changed = true
+		}
+		message := sc.LockMessage
+		if !*sc.Locked {
+			message = ""
+		}
+		if c.LockMessage != message {
+			c.LockMessage = message
+			changed = true
+		}
+	}
 	return changed
 }
 

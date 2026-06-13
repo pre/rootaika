@@ -142,72 +142,10 @@ func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 		"poll_interval_seconds":     config.PollIntervalSeconds,
 		"max_countable_gap_seconds": config.MaxCountableGapSeconds,
 		"debug_mode":                config.DebugMode,
+		"locked":                    config.Locked,
+		"lock_message":              config.LockMessage,
 		"categories":                categories,
 	})
-}
-
-func (a *App) handleClientCommands(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		methodNotAllowed(w)
-		return
-	}
-	if _, ok := a.requireRole(w, r, RoleClient); !ok {
-		return
-	}
-
-	clientID := r.URL.Query().Get("client_id")
-	commands, err := a.store.PendingCommands(r.Context(), clientID, a.now())
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	items := make([]map[string]any, 0, len(commands))
-	for _, command := range commands {
-		items = append(items, map[string]any{
-			"id":         command.ID,
-			"type":       command.Type,
-			"message":    command.Message,
-			"created_at": command.CreatedAt.Format(time.RFC3339),
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"commands": items})
-}
-
-func (a *App) handleCommandAck(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w)
-		return
-	}
-	if _, ok := a.requireRole(w, r, RoleClient); !ok {
-		return
-	}
-
-	commandID, err := commandIDFromAckPath(r.URL.Path)
-	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "command not found")
-		return
-	}
-	clientID := r.URL.Query().Get("client_id")
-	if clientID == "" && r.Body != nil && r.Header.Get("Content-Length") != "0" {
-		var body struct {
-			ClientID string `json:"client_id"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
-			clientID = body.ClientID
-		}
-	}
-
-	ok, err := a.store.AckCommand(r.Context(), commandID, clientID, a.now())
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "ack command failed")
-		return
-	}
-	if !ok {
-		writeAPIError(w, http.StatusNotFound, "command not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"acknowledged": true})
 }
 
 func (a *App) handleAdmin(w http.ResponseWriter, r *http.Request) {
@@ -251,12 +189,13 @@ func (a *App) adminDeviceCommand(w http.ResponseWriter, r *http.Request, rawDevi
 		http.Error(w, "invalid device id", http.StatusBadRequest)
 		return
 	}
+	locked := commandType == "lock"
 	message := ""
-	if commandType == CommandLock {
+	if locked {
 		message = strings.TrimSpace(r.FormValue("message"))
 	}
-	if _, err := a.store.CreateCommand(r.Context(), deviceID, commandType, message, a.now()); err != nil {
-		http.Error(w, "create command failed", http.StatusInternalServerError)
+	if err := a.store.SetDeviceLock(r.Context(), deviceID, locked, message, a.now()); err != nil {
+		http.Error(w, "set device lock failed", http.StatusInternalServerError)
 		return
 	}
 	redirect(w, r, "/#devices")
@@ -407,15 +346,4 @@ func methodNotAllowed(w http.ResponseWriter) {
 
 func redirect(w http.ResponseWriter, r *http.Request, target string) {
 	http.Redirect(w, r, target, http.StatusSeeOther)
-}
-
-func isCommandAckPath(path string) bool {
-	return strings.HasPrefix(path, "/api/v1/client/commands/") && strings.HasSuffix(path, "/ack")
-}
-
-func commandIDFromAckPath(path string) (int64, error) {
-	raw := strings.TrimPrefix(path, "/api/v1/client/commands/")
-	raw = strings.TrimSuffix(raw, "/ack")
-	raw = strings.Trim(raw, "/")
-	return strconv.ParseInt(raw, 10, 64)
 }
