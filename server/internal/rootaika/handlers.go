@@ -296,11 +296,16 @@ func settingsFromForm(r *http.Request) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
+	chartYMax, err := positiveIntForm(r, "chart_y_max_minutes")
+	if err != nil {
+		return Settings{}, err
+	}
 	return Settings{
 		IdleThresholdSeconds:   idle,
 		UploadIntervalSeconds:  upload,
 		PollIntervalSeconds:    poll,
 		MaxCountableGapSeconds: maxGap,
+		ChartYMaxMinutes:       chartYMax,
 		DebugMode:              checkboxForm(r, "debug_mode"),
 		DebugUnassignedClients: checkboxForm(r, "debug_unassigned_clients"),
 	}, nil

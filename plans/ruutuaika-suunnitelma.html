@@ -259,7 +259,19 @@
           <tr>
             <td>Viikko- ja kuukausinäkymä</td>
             <td>Web-UI:ssa päiväkohtaiset summat per laite viikko- ja kuukausitasolla.</td>
-            <td>Palvelimella omat näkymät <code>/week</code> ja <code>/month</code> päiväkohtaisille summille.</td>
+            <td>Numerotaulukot korvattu kuvaajilla: <code>/week</code> ja <code>/month</code> piirtävät viivakuvaajan (x = päivämäärä, y = minuutit), jossa kaikki laitteet samassa kuvaajassa ja laitteet voi piilottaa/näyttää legendan checkboxeista. Kuvaajat piirretään selaimessa käsin tehdyllä inline-SVG/JS:llä (ei kolmannen osapuolen kirjastoja), data haetaan JSON-endpointista <code>/api/v1/charts/usage</code>.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
+            <td>Reaaliaikainen taulunäkymä</td>
+            <td>Ei suunnitelmassa.</td>
+            <td>Uusi <code>/board</code>-näkymä dedikoidulle ulkonäytölle: kaikkien laitteiden kumulatiivinen tänään-kuvaaja (x = kellonaika, y = kertynyt minuutti) sekä valitun laitteen ohjelmakohtaiset kuvaajat (aikasarja per ohjelma + top-ohjelmien pylväskuvaaja, <code>/api/v1/charts/programs</code>). Päivittyy pollaamalla JSON-endpointteja 30 s välein, ei websocketia (pysyy projektin no-deps-linjassa).</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
+            <td>Kuvaajan y-akselin maksimi</td>
+            <td>Ei suunnitelmassa.</td>
+            <td>Y-akseli pysyy vakiona näkymien välillä (ei skaalaudu arvojen mukaan). Maksimi tulee uudesta globaalista asetuksesta <code>chart_y_max_minutes</code> (oletus 720 min = 12 h), säädettävissä admin-asetuksista.</td>
             <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>

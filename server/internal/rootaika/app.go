@@ -33,6 +33,12 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleWeek(w, r)
 	case r.URL.Path == "/month" && r.Method == http.MethodGet:
 		a.handleMonth(w, r)
+	case r.URL.Path == "/board" && r.Method == http.MethodGet:
+		a.handleBoard(w, r)
+	case r.URL.Path == "/api/v1/charts/usage" && r.Method == http.MethodGet:
+		a.handleUsageChart(w, r)
+	case r.URL.Path == "/api/v1/charts/programs" && r.Method == http.MethodGet:
+		a.handleProgramChart(w, r)
 	case r.URL.Path == "/api/v1/events/batch":
 		a.handleEventsBatch(w, r)
 	case r.URL.Path == "/api/v1/client/config":

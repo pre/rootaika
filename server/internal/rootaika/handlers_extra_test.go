@@ -110,6 +110,7 @@ func TestHandleClientConfigReturnsDebugMode(t *testing.T) {
 		UploadIntervalSeconds:  60,
 		PollIntervalSeconds:    30,
 		MaxCountableGapSeconds: 300,
+		ChartYMaxMinutes:       720,
 		DebugMode:              true,
 	}, app.now()); err != nil {
 		t.Fatalf("update settings: %v", err)
@@ -142,6 +143,7 @@ func TestHandleClientConfigDebugsUnassignedClient(t *testing.T) {
 		UploadIntervalSeconds:  60,
 		PollIntervalSeconds:    30,
 		MaxCountableGapSeconds: 300,
+		ChartYMaxMinutes:       720,
 		DebugUnassignedClients: true,
 	}, app.now()); err != nil {
 		t.Fatalf("update settings: %v", err)
@@ -242,6 +244,7 @@ func TestHandleAdminRouting(t *testing.T) {
 		"upload_interval_seconds":   {"60"},
 		"poll_interval_seconds":     {"30"},
 		"max_countable_gap_seconds": {"300"},
+		"chart_y_max_minutes":       {"720"},
 		"debug_mode":                {"on"},
 		"debug_unassigned_clients":  {"on"},
 	}); rec.Code != http.StatusSeeOther {
@@ -304,6 +307,7 @@ func TestSettingsFromForm(t *testing.T) {
 		"upload_interval_seconds":   {"120"},
 		"poll_interval_seconds":     {"45"},
 		"max_countable_gap_seconds": {"600"},
+		"chart_y_max_minutes":       {"480"},
 		"debug_mode":                {"on"},
 		"debug_unassigned_clients":  {"on"},
 	}
@@ -321,6 +325,7 @@ func TestSettingsFromForm(t *testing.T) {
 		UploadIntervalSeconds:  120,
 		PollIntervalSeconds:    45,
 		MaxCountableGapSeconds: 600,
+		ChartYMaxMinutes:       480,
 		DebugMode:              true,
 		DebugUnassignedClients: true,
 	}
@@ -330,12 +335,13 @@ func TestSettingsFromForm(t *testing.T) {
 }
 
 func TestSettingsFromFormPropagatesError(t *testing.T) {
-	keys := []string{"idle_threshold_seconds", "upload_interval_seconds", "poll_interval_seconds", "max_countable_gap_seconds"}
+	keys := []string{"idle_threshold_seconds", "upload_interval_seconds", "poll_interval_seconds", "max_countable_gap_seconds", "chart_y_max_minutes"}
 	base := url.Values{
 		"idle_threshold_seconds":    {"60"},
 		"upload_interval_seconds":   {"60"},
 		"poll_interval_seconds":     {"30"},
 		"max_countable_gap_seconds": {"300"},
+		"chart_y_max_minutes":       {"720"},
 	}
 	for _, key := range keys {
 		form := url.Values{}
