@@ -134,6 +134,12 @@ func TestDashboardRendersWithDeviceAndDebugCheckbox(t *testing.T) {
 	if !strings.Contains(body, `name="debug_unassigned_clients"`) {
 		t.Fatalf("dashboard missing debug_unassigned_clients checkbox")
 	}
+	if !strings.Contains(body, `/admin/devices/`+strconvInt(device.ID)+`/delete`) {
+		t.Fatalf("dashboard missing device delete form")
+	}
+	if !strings.Contains(body, `confirm('Poistetaanko laite ja sen tapahtumat pysyvästi?')`) {
+		t.Fatalf("dashboard missing device delete confirmation")
+	}
 }
 
 func TestDashboardClientIsReadOnly(t *testing.T) {

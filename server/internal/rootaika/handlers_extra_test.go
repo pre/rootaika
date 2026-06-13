@@ -283,6 +283,13 @@ func TestHandleAdminRouting(t *testing.T) {
 	if rec := postForm(t, app, "/admin/devices/"+strconvInt(device.ID)+"/unlock", nil); rec.Code != http.StatusSeeOther {
 		t.Fatalf("unlock status = %d", rec.Code)
 	}
+	if rec := postForm(t, app, "/admin/devices/"+strconvInt(device.ID)+"/delete", nil); rec.Code != http.StatusSeeOther {
+		t.Fatalf("delete device status = %d", rec.Code)
+	}
+	devices, _ := app.store.Devices(ctx)
+	if len(devices) != 0 {
+		t.Fatalf("device not deleted: %+v", devices)
+	}
 
 	// settings
 	if rec := postForm(t, app, "/admin/settings", url.Values{
@@ -327,6 +334,9 @@ func TestHandleAdminInvalidIDsAndBadForm(t *testing.T) {
 	app := testApp(t)
 	if rec := postForm(t, app, "/admin/devices/notanumber/lock", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad device id status = %d", rec.Code)
+	}
+	if rec := postForm(t, app, "/admin/devices/notanumber/delete", nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad delete device id status = %d", rec.Code)
 	}
 	if rec := postForm(t, app, "/admin/categories/notanumber/delete", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad category id status = %d", rec.Code)

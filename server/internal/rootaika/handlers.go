@@ -229,6 +229,8 @@ func (a *App) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		a.adminDeviceCommand(w, r, parts[1], parts[2])
 	case len(parts) == 3 && parts[0] == "devices" && parts[2] == "assign":
 		a.adminAssignDevice(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "devices" && parts[2] == "delete":
+		a.adminDeleteDevice(w, r, parts[1])
 	case len(parts) == 1 && parts[0] == "settings":
 		a.adminSettings(w, r)
 	case len(parts) == 1 && parts[0] == "categories":
@@ -272,6 +274,19 @@ func (a *App) adminAssignDevice(w http.ResponseWriter, r *http.Request, rawDevic
 	}
 	if err := a.store.UpdateDevice(r.Context(), deviceID, r.FormValue("display_name"), userID); err != nil {
 		http.Error(w, "update device failed", http.StatusInternalServerError)
+		return
+	}
+	redirect(w, r, "/#devices")
+}
+
+func (a *App) adminDeleteDevice(w http.ResponseWriter, r *http.Request, rawDeviceID string) {
+	deviceID, err := strconv.ParseInt(rawDeviceID, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid device id", http.StatusBadRequest)
+		return
+	}
+	if err := a.store.DeleteDevice(r.Context(), deviceID); err != nil {
+		http.Error(w, "delete device failed", http.StatusInternalServerError)
 		return
 	}
 	redirect(w, r, "/#devices")

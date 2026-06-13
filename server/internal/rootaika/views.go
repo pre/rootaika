@@ -307,6 +307,7 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
               </form>
               <form method="post" action="/admin/devices/{{.Device.ID}}/lock"><button class="warn" type="submit">Lock</button></form>
               <form method="post" action="/admin/devices/{{.Device.ID}}/unlock"><button type="submit">Unlock</button></form>
+              <form method="post" action="/admin/devices/{{.Device.ID}}/delete"><button class="secondary" type="submit" onclick="return confirm('Poistetaanko laite ja sen tapahtumat pysyvästi?')">Poista</button></form>
               {{end}}
             </td>
           </tr>

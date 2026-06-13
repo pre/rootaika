@@ -404,6 +404,59 @@ func TestUpdateDeviceAssignsUserAndStatus(t *testing.T) {
 	}
 }
 
+func TestDeleteDeviceRemovesDeviceAndRelatedRows(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if err := store.CreateUser(ctx, "Bob", fixedNow()); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	users, err := store.Users(ctx)
+	if err != nil {
+		t.Fatalf("users: %v", err)
+	}
+	if err := store.UpdateDevice(ctx, device.ID, "Workstation", &users[0].ID); err != nil {
+		t.Fatalf("assign device: %v", err)
+	}
+	if _, _, err := store.InsertEvents(ctx, device.ID, []EventInput{
+		{EventUUID: "a", Type: EventTypeActivityObserved, State: StateActive, ProcessName: "steam.exe", OccurredAt: fixedNow(), Sequence: 1},
+	}, fixedNow()); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+	if _, err := store.CreateCommand(ctx, device.ID, CommandLock, fixedNow()); err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+
+	if err := store.DeleteDevice(ctx, device.ID); err != nil {
+		t.Fatalf("delete device: %v", err)
+	}
+
+	devices, err := store.Devices(ctx)
+	if err != nil {
+		t.Fatalf("devices: %v", err)
+	}
+	if len(devices) != 0 {
+		t.Fatalf("devices after delete = %+v", devices)
+	}
+
+	for table, query := range map[string]string{
+		"events":        `SELECT COUNT(*) FROM events WHERE device_id = ?`,
+		"device_config": `SELECT COUNT(*) FROM device_config WHERE device_id = ?`,
+		"commands":      `SELECT COUNT(*) FROM commands WHERE device_id = ?`,
+	} {
+		var count int
+		if err := store.db.QueryRowContext(ctx, query, device.ID).Scan(&count); err != nil {
+			t.Fatalf("%s count: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows after delete = %d", table, count)
+		}
+	}
+}
+
 func TestUpdateSettingsPersistsAndRejectsNonPositive(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()

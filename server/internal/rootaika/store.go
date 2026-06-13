@@ -457,6 +457,26 @@ UPDATE devices SET display_name = ?, user_id = ?, registration_status = ? WHERE 
 	return err
 }
 
+func (s *Store) DeleteDevice(ctx context.Context, deviceID int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, query := range []string{
+		`DELETE FROM events WHERE device_id = ?`,
+		`DELETE FROM device_config WHERE device_id = ?`,
+		`DELETE FROM commands WHERE device_id = ?`,
+		`DELETE FROM devices WHERE id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, query, deviceID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) Settings(ctx context.Context) (Settings, error) {
 	return settingsFromDB(ctx, s.db)
 }
