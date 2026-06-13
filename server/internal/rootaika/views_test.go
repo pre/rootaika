@@ -131,6 +131,9 @@ func TestDashboardRendersWithDeviceAndDebugCheckbox(t *testing.T) {
 	if !strings.Contains(body, `name="debug_mode"`) {
 		t.Fatalf("dashboard missing debug_mode checkbox")
 	}
+	if !strings.Contains(body, `name="debug_unassigned_clients"`) {
+		t.Fatalf("dashboard missing debug_unassigned_clients checkbox")
+	}
 }
 
 func TestDashboardClientIsReadOnly(t *testing.T) {

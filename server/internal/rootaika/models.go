@@ -80,6 +80,7 @@ type Settings struct {
 	PollIntervalSeconds    int
 	MaxCountableGapSeconds int
 	DebugMode              bool
+	DebugUnassignedClients bool
 }
 
 type Command struct {

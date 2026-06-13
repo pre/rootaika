@@ -343,6 +343,7 @@ func settingsFromForm(r *http.Request) (Settings, error) {
 		PollIntervalSeconds:    poll,
 		MaxCountableGapSeconds: maxGap,
 		DebugMode:              checkboxForm(r, "debug_mode"),
+		DebugUnassignedClients: checkboxForm(r, "debug_unassigned_clients"),
 	}, nil
 }
 

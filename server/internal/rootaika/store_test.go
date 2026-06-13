@@ -47,7 +47,8 @@ func TestOpenStoreSeedsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings: %v", err)
 	}
-	if settings.IdleThresholdSeconds != 60 || settings.MaxCountableGapSeconds != 300 || settings.DebugMode {
+	if settings.IdleThresholdSeconds != 60 || settings.MaxCountableGapSeconds != 300 ||
+		settings.DebugMode || settings.DebugUnassignedClients {
 		t.Fatalf("seeded settings = %+v", settings)
 	}
 }
@@ -204,6 +205,47 @@ func TestClientConfigReturnsConfigAndCategories(t *testing.T) {
 	}
 	if len(config.Categories) != 1 || config.Categories[0].Category != "pelit" {
 		t.Fatalf("categories = %+v", config.Categories)
+	}
+}
+
+func TestClientConfigDebugsUnassignedClientsWhenEnabled(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	if err := store.UpdateSettings(ctx, Settings{
+		IdleThresholdSeconds:   60,
+		UploadIntervalSeconds:  60,
+		PollIntervalSeconds:    30,
+		MaxCountableGapSeconds: 300,
+		DebugUnassignedClients: true,
+	}, fixedNow()); err != nil {
+		t.Fatalf("update settings: %v", err)
+	}
+
+	config, err := store.ClientConfig(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("client config: %v", err)
+	}
+	if !config.DebugMode {
+		t.Fatalf("unassigned client debug mode should be true")
+	}
+
+	if err := store.CreateUser(ctx, "Alice", fixedNow()); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	users, err := store.Users(ctx)
+	if err != nil {
+		t.Fatalf("users: %v", err)
+	}
+	if err := store.UpdateDevice(ctx, config.DeviceID, "Box", &users[0].ID); err != nil {
+		t.Fatalf("assign device: %v", err)
+	}
+
+	config, err = store.ClientConfig(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("client config after assign: %v", err)
+	}
+	if config.DebugMode {
+		t.Fatalf("assigned client debug mode should follow global debug setting")
 	}
 }
 
@@ -376,6 +418,7 @@ func TestUpdateSettingsPersistsAndRejectsNonPositive(t *testing.T) {
 		PollIntervalSeconds:    45,
 		MaxCountableGapSeconds: 600,
 		DebugMode:              true,
+		DebugUnassignedClients: true,
 	}
 	if err := store.UpdateSettings(ctx, settings, fixedNow()); err != nil {
 		t.Fatalf("update settings: %v", err)

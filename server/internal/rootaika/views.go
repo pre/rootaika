@@ -341,6 +341,7 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
         <label class="stack">Polling-väli, s<input name="poll_interval_seconds" type="number" min="1" value="{{.Settings.PollIntervalSeconds}}" {{if .ReadOnly}}disabled{{end}}></label>
         <label class="stack">Maksimilaskentaväli, s<input name="max_countable_gap_seconds" type="number" min="1" value="{{.Settings.MaxCountableGapSeconds}}" {{if .ReadOnly}}disabled{{end}}></label>
         <label class="inline"><input name="debug_mode" type="checkbox" value="on" {{if .Settings.DebugMode}}checked{{end}} {{if .ReadOnly}}disabled{{end}}> Debug-tila (näytä clientin konsoli)</label>
+        <label class="inline"><input name="debug_unassigned_clients" type="checkbox" value="on" {{if .Settings.DebugUnassignedClients}}checked{{end}} {{if .ReadOnly}}disabled{{end}}> Debug-tila rekisteröimättömille clienteille</label>
         {{if not .ReadOnly}}<div><button type="submit">Tallenna asetukset</button></div>{{end}}
       </form>
     </section>

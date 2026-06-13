@@ -239,6 +239,12 @@
             <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>
+            <td>Debug uusille clienteille</td>
+            <td>Suunnitelmassa mainitaan yleinen <code>debug_mode</code>-lippu, mutta ei tapaa ohjata vielä rekisteröimättömiä clienteja erikseen.</td>
+            <td>Admin-asetuksiin lisätty <code>debug_unassigned_clients</code>, joka palauttaa <code>debug_mode=true</code> laitteille, joiden tila on vielä <code>unassigned</code>.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
             <td>Tila-muutoseventti</td>
             <td>Havainto syntyy heti, kun tila tai aktiivinen prosessi vaihtuu, sekä säännöllisin välein.</td>
             <td>Agentti vertaa edelliseen havaintoon ja lähettää heti muutoshetkellä, muutoin heartbeat-välein.</td>
@@ -623,7 +629,7 @@
         <li>Kuukausinäkymä: päiväkohtainen tai viikkokohtainen yhteenveto.</li>
         <li>Laitteet: nimi, UUID, käyttäjäliitos ja viimeisin yhteys.</li>
         <li>Käyttäjät: käyttäjien luonti ja nimeäminen.</li>
-        <li>Asetukset: idle-raja, upload-väli, polling-väli, maksimilaskentaväli ja debug-tila.</li>
+        <li>Asetukset: idle-raja, upload-väli, polling-väli, maksimilaskentaväli, debug-tila ja rekisteröimättömien clientien debug-oletus.</li>
         <li>Kategoriat: prosessinimipohjaiset kategoriat, esim. pelit, selain ja muu.</li>
         <li>Admin-toiminnot: lock/unlock, asetusten muokkaus ja laite-/käyttäjähallinta.</li>
       </ul>

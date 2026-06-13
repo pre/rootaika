@@ -131,6 +131,7 @@ func (s *Store) seed(ctx context.Context, now time.Time) error {
 		"poll_interval_seconds":     "30",
 		"max_countable_gap_seconds": "300",
 		"debug_mode":                "0",
+		"debug_unassigned_clients":  "0",
 	}
 	for key, value := range defaults {
 		if _, err := s.db.ExecContext(ctx, `
@@ -310,7 +311,7 @@ FROM device_config WHERE device_id = ?`, device.ID).
 		return ClientConfig{}, err
 	}
 	config.MaxCountableGapSeconds = settings.MaxCountableGapSeconds
-	config.DebugMode = settings.DebugMode
+	config.DebugMode = settings.DebugMode || (settings.DebugUnassignedClients && device.RegistrationStatus == "unassigned")
 
 	categories, err := s.Categories(ctx)
 	if err != nil {
@@ -478,6 +479,7 @@ func (s *Store) UpdateSettings(ctx context.Context, settings Settings, now time.
 		"poll_interval_seconds":     settings.PollIntervalSeconds,
 		"max_countable_gap_seconds": settings.MaxCountableGapSeconds,
 		"debug_mode":                boolToInt(settings.DebugMode),
+		"debug_unassigned_clients":  boolToInt(settings.DebugUnassignedClients),
 	}
 	for key, value := range values {
 		if _, err := tx.ExecContext(ctx, `
@@ -716,6 +718,7 @@ func settingsFromValues(values map[string]int) Settings {
 		PollIntervalSeconds:    defaultInt(values["poll_interval_seconds"], 30),
 		MaxCountableGapSeconds: defaultInt(values["max_countable_gap_seconds"], 300),
 		DebugMode:              values["debug_mode"] != 0,
+		DebugUnassignedClients: values["debug_unassigned_clients"] != 0,
 	}
 }
 

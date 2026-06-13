@@ -135,6 +135,35 @@ func TestHandleClientConfigReturnsDebugMode(t *testing.T) {
 	}
 }
 
+func TestHandleClientConfigDebugsUnassignedClient(t *testing.T) {
+	app := testApp(t)
+	if err := app.store.UpdateSettings(context.Background(), Settings{
+		IdleThresholdSeconds:   60,
+		UploadIntervalSeconds:  60,
+		PollIntervalSeconds:    30,
+		MaxCountableGapSeconds: 300,
+		DebugUnassignedClients: true,
+	}, app.now()); err != nil {
+		t.Fatalf("update settings: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/client/config?client_id=client-1", nil)
+	request.SetBasicAuth("client", "client")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("config status = %d", recorder.Code)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if response["debug_mode"] != true {
+		t.Fatalf("debug_mode = %v want true", response["debug_mode"])
+	}
+}
+
 func TestHandleClientCommandsEmpty(t *testing.T) {
 	app := testApp(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/client/commands?client_id=client-1", nil)
@@ -262,6 +291,7 @@ func TestHandleAdminRouting(t *testing.T) {
 		"poll_interval_seconds":     {"30"},
 		"max_countable_gap_seconds": {"300"},
 		"debug_mode":                {"on"},
+		"debug_unassigned_clients":  {"on"},
 	}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("settings status = %d", rec.Code)
 	}
@@ -320,6 +350,7 @@ func TestSettingsFromForm(t *testing.T) {
 		"poll_interval_seconds":     {"45"},
 		"max_countable_gap_seconds": {"600"},
 		"debug_mode":                {"on"},
+		"debug_unassigned_clients":  {"on"},
 	}
 	request := httptest.NewRequest(http.MethodPost, "/admin/settings", strings.NewReader(form.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -330,7 +361,14 @@ func TestSettingsFromForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings from form: %v", err)
 	}
-	want := Settings{IdleThresholdSeconds: 90, UploadIntervalSeconds: 120, PollIntervalSeconds: 45, MaxCountableGapSeconds: 600, DebugMode: true}
+	want := Settings{
+		IdleThresholdSeconds:   90,
+		UploadIntervalSeconds:  120,
+		PollIntervalSeconds:    45,
+		MaxCountableGapSeconds: 600,
+		DebugMode:              true,
+		DebugUnassignedClients: true,
+	}
 	if settings != want {
 		t.Fatalf("settings = %+v want %+v", settings, want)
 	}
