@@ -43,6 +43,16 @@ if (-not (Test-Path $serviceExe) -or -not (Test-Path $agentExe)) {
     throw "Binaries not found in $DistDir. Cross-compile them in WSL first (see the script's .NOTES)."
 }
 
+# Stop any leftover processes from a previous run. A service that was not shut
+# down cleanly keeps holding the agent endpoint port (default 127.0.0.1:48611)
+# and locks the exe files, which would otherwise fail the copy and the bind.
+$leftovers = Get-Process rootaika-service, rootaika-agent -ErrorAction SilentlyContinue
+if ($leftovers) {
+    Write-Host "Stopping leftover rootaika processes from a previous run..." -ForegroundColor Yellow
+    $leftovers | Stop-Process -Force
+    Start-Sleep -Milliseconds 500
+}
+
 # An exe cannot be reliably launched from a UNC path, so copy into a local directory.
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 Copy-Item $serviceExe, $agentExe $WorkDir -Force
