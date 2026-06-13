@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="fi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rootaika - Lukitusvaroitus (TTS + laskuri-overlay)</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --text: #1f2933;
+      --muted: #5b6673;
+      --border: #d8dee6;
+      --accent: #0f766e;
+      --accent-soft: #e6f4f1;
+      --warn: #8a5a00;
+      --warn-soft: #fff5d6;
+      --code: #f0f3f7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 48px 24px 72px;
+    }
+
+    header {
+      margin-bottom: 32px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      line-height: 1.05;
+    }
+
+    h2 {
+      margin: 40px 0 14px;
+      font-size: 1.45rem;
+      line-height: 1.25;
+    }
+
+    h3 {
+      margin: 22px 0 8px;
+      font-size: 1.08rem;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    ul,
+    ol {
+      margin: 0 0 16px 1.25rem;
+      padding: 0;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    code {
+      padding: 0.12rem 0.32rem;
+      border-radius: 4px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #101827;
+      color: #eef4ff;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 22px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf2f7;
+      font-weight: 650;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .note {
+      padding: 14px 16px;
+      border: 1px solid #f0d98b;
+      border-radius: 8px;
+      background: var(--warn-soft);
+      color: var(--warn);
+      margin: 0 0 18px;
+    }
+
+    .section {
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      margin-bottom: 18px;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.86rem;
+      font-weight: 650;
+    }
+
+    .file {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      color: var(--accent);
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="pill">Suunnitelma</p>
+      <h1>Lukitusvaroitus</h1>
+      <p>
+        Ennen kuin agentti lukitsee ruudun, käyttäjää varoitetaan: agentti
+        <strong>puhuu</strong> palvelimelta tulleen viestin (macOS <code>say</code> -tyyliin) ja
+        näyttää <strong>laskurin</strong>, joka leijuu kaiken päällä mutta ei varasta fokusta
+        eikä keskeytä peliä. Käynnissä olevaa Steam-peliä voi pelata varoitusajan loppuun asti.
+        Kun laskuri päättyy, nykyinen lukitusoverlay ottaa ruudun haltuun.
+      </p>
+    </header>
+
+    <section class="section" aria-label="Tausta">
+      <h2>Tausta ja tavoite</h2>
+      <p>
+        Nykyään admin lukitsee laitteen <code>lock</code>-komennolla, ja ruutu menee kerralla
+        mustaksi ilman ennakkovaroitusta. Tavoite on antaa pelaajalle ennakkovaroitus
+        äänellä ja näkyvällä laskurilla.
+      </p>
+      <p>
+        Valittu malli (vahvistettu): varoitus on osa <code>lock</code>-komentoa, ei erillinen
+        komento. Yksi admin-klikkaus varoittaa ja lukitsee. Varoituslogiikka asuu klientillä,
+        kuten lukitustarkistuskin.
+      </p>
+      <h3>Reunaehdot</h3>
+      <ul>
+        <li>
+          <strong>Laskuri ei ole tavallinen ikkuna:</strong> läpiklikattava
+          (<code>WS_EX_TRANSPARENT</code>), ei-aktivoituva (<code>WS_EX_NOACTIVATE</code>),
+          topmost, layered. Peli pysyy aktiivisena ja pelattavana.
+        </li>
+        <li>
+          <strong>TTS-ääni on ensisijainen varoitus.</strong> Se kuuluu aina, myös
+          exclusive-fullscreen-pelin päältä. Visuaalinen laskuri on lisä, joka näkyy
+          borderless/windowed-peleissä (käytännön yleisin tapaus).
+        </li>
+        <li>
+          <strong>Suomi-ääni:</strong> puhutaan saatavilla olevalla äänellä; valitaan
+          <code>fi-FI</code>-ääni jos asennettu, muuten fallback. README:hen ohje
+          Microsoft Heidi -äänen asennukseen.
+        </li>
+      </ul>
+      <div class="note">
+        <strong>Tunnettu rajoite:</strong> aito exclusive-fullscreen DirectX-peli ei näytä
+        mitään ulkoista overlayta päällään. Tätä ei ratkota injektoimalla (Steam/Discord -tyyli)
+        koska se on tämän projektin ulkopuolella. Siksi ääni kantaa kaikkialle ja laskuri on lisä.
+      </div>
+    </section>
+
+    <section class="section" aria-label="Datamalli">
+      <h2>Datamalli: yksi uusi kenttä</h2>
+      <p>
+        Lisätään <code>warning_seconds</code> komentoon. Sama <code>message</code> toimii
+        lukitusruudun tekstinä, puhuttavana varoituksena ja laskurin tekstinä, joten toista
+        saraketta ei tarvita. <code>warning_seconds &gt; 0</code> tarkoittaa, että lukitusta
+        edeltää varoitus. <code>validCommand</code> pysyy ennallaan (<code>lock</code>/<code>unlock</code>);
+        varoitus ei ole oma komentotyyppi.
+      </p>
+    </section>
+
+    <section class="section" aria-label="Server-muutokset">
+      <h2>Server (<span class="file">server/internal/rootaika</span>)</h2>
+      <ol>
+        <li>
+          <span class="file">store.go</span> schema: lisää <code>commands</code>-tauluun
+          <code>warning_seconds INTEGER NOT NULL DEFAULT 0</code>. <code>migrate</code>-funktioon
+          <code>ensureColumn(ctx, "commands", "warning_seconds", "INTEGER NOT NULL DEFAULT 0")</code>
+          (vrt. olemassa oleva <code>message</code>-sarakkeen ensureColumn).
+        </li>
+        <li>
+          <span class="file">models.go</span>: <code>Command</code>-structiin <code>WarningSeconds int</code>.
+        </li>
+        <li>
+          <span class="file">store.go</span> <code>CreateCommand</code>: lisää
+          <code>warningSeconds int</code> -parametri ja INSERT. Päivitä molemmat SELECTit
+          (<code>PendingCommands</code>, <code>RecentCommands</code>) lukemaan
+          <code>warning_seconds</code>, ja <code>scanCommands</code> molemmat sarakemäärähaarat
+          (7&rarr;8 ja 8&rarr;9 saraketta).
+        </li>
+        <li>
+          <span class="file">handlers.go</span> <code>adminDeviceCommand</code>: lue
+          <code>r.FormValue("warning_seconds")</code> (parse int, clamp 0&ndash;600, oletus 0)
+          ja välitä <code>CreateCommand</code>-kutsuun.
+        </li>
+        <li>
+          <span class="file">handlers.go</span> <code>handleClientCommands</code>: lisää
+          <code>"warning_seconds"</code> JSON-mappiin.
+        </li>
+        <li>
+          <span class="file">views.go</span> lock-lomake: lisää numerokenttä viestikentän
+          viereen, esim.
+          <code>&lt;input name="warning_seconds" type="number" min="0" max="600" value="30"&gt;</code>.
+        </li>
+      </ol>
+    </section>
+
+    <section class="section" aria-label="Client-muutokset">
+      <h2>Windows-client (<span class="file">client-windows</span>)</h2>
+      <ol start="7">
+        <li>
+          <span class="file">internal/model/model.go</span>: <code>Command</code>-structiin
+          <code>WarningSeconds int `json:"warning_seconds,omitempty"`</code>.
+        </li>
+        <li>
+          <span class="file">internal/config/config.go</span>: <code>Config</code>-structiin
+          <code>LockWarningSeconds int `json:"lock_warning_seconds,omitempty"`</code>.
+        </li>
+        <li>
+          <span class="file">internal/serviceapp/app.go</span> <code>handleCommand</code>:
+          <code>lock</code>-haarassa aseta <code>cfg.LockWarningSeconds = command.WarningSeconds</code>,
+          <code>unlock</code>-haarassa nollaa se. Lisää <code>LockWarningSeconds</code>
+          <code>agentStateResponse</code>-structiin ja <code>/agent/state</code>-handleriin.
+        </li>
+        <li>
+          <span class="file">cmd/rootaika-agent/main.go</span>: <code>serviceState</code>-structiin
+          <code>LockWarningSeconds</code>. Lisää siirtymän tunnistus paikallisella
+          <code>warnedForLock bool</code>:lla. Loopissa ennen
+          <code>locker.SetLocked(true, ...)</code>:
+          <ul>
+            <li>
+              jos <code>state.Locked &amp;&amp; !warnedForLock &amp;&amp; state.LockWarningSeconds &gt; 0</code>:
+              aja <code>locker.Warn(ctx, state.LockMessage, state.LockWarningSeconds)</code>,
+              aseta <code>warnedForLock = true</code>, vasta sitten <code>SetLocked(true)</code>;
+            </li>
+            <li>kun <code>state.Locked == false</code>: <code>warnedForLock = false</code>.</li>
+          </ul>
+          Varoitus ajetaan niin että varoitusajan aikana tullut <code>unlock</code> peruuttaa sen
+          (goroutine + <code>ctx</code>/peruutus, kun <code>Locked</code> muuttuu falseksi).
+        </li>
+        <li>
+          <span class="file">internal/lock/controller_windows.go</span>: uusi metodi
+          <code>Warn(ctx, message string, seconds int) error</code>, joka tekee kaksi asiaa:
+          <ul>
+            <li>
+              <strong>Puhuu</strong> viestin erillisellä PowerShellillä; teksti
+              <code>ROOTAIKA_SAY_TEXT</code>-ympäristömuuttujassa (sama injektiosuoja kuin
+              nykyinen <code>ROOTAIKA_LOCK_MESSAGE</code>). Yrittää valita
+              <code>fi-FI</code>-äänen (<code>GetInstalledVoices</code> / <code>SelectVoiceByHints</code>),
+              try/catch &rarr; fallback oletusääneen, sitten <code>Speak</code>.
+            </li>
+            <li>
+              <strong>Näyttää laskurin</strong> overlay-PowerShellillä kuten nykyinen lukitus,
+              MUTTA ilman <code>Activate()</code>-timeria, ja asettaa ext-tyylit P/Invokella
+              (<code>SetWindowLong</code> GWL_EXSTYLE):
+              <code>WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOPMOST</code>.
+              Timer laskee sekunteja; ikkuna sulkeutuu kun laskuri = 0. Teksti envissä, sekunnit
+              <code>ROOTAIKA_WARN_SECONDS</code>-envissä.
+            </li>
+          </ul>
+        </li>
+        <li>
+          <span class="file">internal/lock/controller_other.go</span>: lisää <code>Warn</code>-stub
+          (no-op), jotta Linux-buildi ja -testit kääntyvät, vastaten olemassa olevaa
+          <code>SetLocked</code>-stubia.
+        </li>
+      </ol>
+    </section>
+
+    <section class="section" aria-label="Esimerkki TTS">
+      <h2>Esimerkki: TTS-skripti (suomi + fallback)</h2>
+      <pre><code>Add-Type -AssemblyName System.Speech
+$s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+try {
+  $fi = $s.GetInstalledVoices() |
+        Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.Name -eq 'fi-FI' } |
+        Select-Object -First 1
+  if ($fi) { $s.SelectVoice($fi.VoiceInfo.Name) }
+} catch { }
+$s.Speak($env:ROOTAIKA_SAY_TEXT)</code></pre>
+      <p>
+        Teksti välitetään aina ympäristömuuttujassa, ei skriptiin interpoloituna, jotta viesti ei
+        voi murtautua ulos PowerShell-merkkijonosta tai injektoida komentoja.
+      </p>
+    </section>
+
+    <section class="section" aria-label="Uudelleenkaytto">
+      <h2>Uudelleenkäyttö (ei kirjoiteta uutta)</h2>
+      <ul>
+        <li>
+          Komentoputki <code>lock</code>/<code>unlock</code>: <code>CreateCommand</code> &rarr;
+          <code>PendingCommands</code> &rarr; JSON &rarr; <code>model.Command</code> &rarr;
+          <code>handleCommand</code> &rarr; config &rarr; <code>/agent/state</code> &rarr; agentin
+          loop. Varoitus kulkee samaa reittiä.
+        </li>
+        <li>Injektiosuoja envin kautta: jo käytössä <code>controller_windows.go</code>.</li>
+        <li>Migraatiokuvio <code>ensureColumn</code>; snapshot/update-kuvio <code>stateStore</code>.</li>
+      </ul>
+    </section>
+
+    <section class="section" aria-label="Dokumentaatio">
+      <h2>Dokumentaatio</h2>
+      <ul>
+        <li>
+          <span class="file">README.md</span>: ohje suomenkielisen TTS-äänen (Microsoft Heidi)
+          asennukseen (Asetukset &rarr; Aika ja kieli &rarr; Kieli &rarr; suomi &rarr; Puhe), ja
+          maininta että ilman sitä varoitus puhutaan saatavilla olevalla äänellä.
+        </li>
+        <li>
+          <span class="file">plans/ruutuaika-suunnitelma.html</span>: lisää poikkeamataulukkoon
+          rivi varoitusvaiheesta (<code>lock</code>-komentoon <code>warning_seconds</code>; TTS +
+          läpiklikattava laskuri; exclusive-fullscreen-rajoite kirjattu).
+        </li>
+      </ul>
+    </section>
+
+    <section class="section" aria-label="Todennus">
+      <h2>Todennus</h2>
+      <ul>
+        <li>
+          <strong>Server-yksikkötestit</strong> (<code>go test -race -cover ./...</code>):
+          <code>warning_seconds</code> persistoituu <code>CreateCommand</code>:ssa, näkyy
+          <code>PendingCommands</code>- ja <code>RecentCommands</code>-tuloksissa, ja
+          <code>handleClientCommands</code> palauttaa sen JSONissa.
+        </li>
+        <li>
+          <strong>Client-yksikkötestit</strong>: <code>model.Command</code> dekoodaa
+          <code>warning_seconds</code>; <code>handleCommand</code> asettaa
+          <code>LockWarningSeconds</code>. Windows-spesifit (<code>Warn</code>, overlay) eivät
+          käänny Linuxilla &rarr; varmista että <code>controller_other.go</code>-stub kääntyy;
+          oikea käytös todennetaan käsin Windowsilla (CLAUDE.md-konventio).
+        </li>
+        <li>
+          <strong>Manuaalinen Windows-testi:</strong> käynnistä server + service + agent;
+          admin-UI:ssa viesti + <code>warning_seconds=30</code> + Lock; varmista että agentti
+          puhuu, laskuri näkyy borderless-Steam-pelin päällä, peli pysyy pelattavana, ja 30 s
+          jälkeen musta lukitusoverlay tulee. Testaa unlock varoituksen aikana &rarr; lukitus
+          peruuntuu ja laskuri katoaa. Testaa myös ilman suomi-ääntä (fallback ei kaadu).
+        </li>
+        <li>
+          <strong>Cross-compile:</strong> <code>GOOS=windows go build ./...</code> client-windows/:ssa.
+        </li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
