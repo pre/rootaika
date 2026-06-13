@@ -3,6 +3,8 @@
 package consolewin
 
 import (
+	"log"
+	"os"
 	"sync"
 
 	"golang.org/x/sys/windows"
@@ -47,6 +49,10 @@ func (c *windowsController) SetVisible(visible bool) error {
 		// so debug output has somewhere to go.
 		procAllocConsole.Call()
 		hwnd = consoleWindow()
+		// AllocConsole creates the window but leaves Go's std handles pointing at
+		// the inherited (null) handles, so log output would go nowhere visible.
+		// Rebind stdout/stderr to the new console buffer.
+		redirectStdHandles()
 	}
 	if hwnd != 0 {
 		cmd := uintptr(swHide)
@@ -66,4 +72,17 @@ func (c *windowsController) Close() error {
 func consoleWindow() uintptr {
 	hwnd, _, _ := procGetConsoleWin.Call()
 	return hwnd
+}
+
+// redirectStdHandles points os.Stdout/os.Stderr and the default logger at the
+// freshly allocated console. Without this the agent (built with -H=windowsgui)
+// writes to the inherited null handles and the debug window stays empty.
+func redirectStdHandles() {
+	conout, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0)
+	if err != nil {
+		return
+	}
+	os.Stdout = conout
+	os.Stderr = conout
+	log.SetOutput(conout)
 }

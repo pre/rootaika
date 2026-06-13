@@ -61,12 +61,16 @@ func run(ctx context.Context, cfgPath string) error {
 		DebugMode:              cfg.DebugMode,
 	}
 
+	log.Printf("rootaika-agent started, service endpoint %s", cfg.AgentListenAddress)
+
 	var last *model.Event
 	var lastSentAt time.Time
 
 	for {
 		if latest, err := local.fetchState(ctx); err == nil {
 			state = latest
+			log.Printf("received state from service: debug=%t locked=%t idle_threshold=%ds observe=%ds",
+				state.DebugMode, state.Locked, state.IdleThresholdSeconds, state.ObserveIntervalSeconds)
 		} else {
 			log.Printf("fetch service state failed: %v", err)
 		}
@@ -89,6 +93,8 @@ func run(ctx context.Context, cfgPath string) error {
 					stored := event
 					last = &stored
 					lastSentAt = event.OccurredAt
+					log.Printf("sent event to service: state=%s process=%q at=%s",
+						event.State, event.ProcessName, event.OccurredAt.Format(time.RFC3339))
 				}
 			}
 		}

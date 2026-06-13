@@ -147,6 +147,7 @@ func uploadOnce(ctx context.Context, store *stateStore, eventBuffer *buffer.Buff
 	if err := client.PostEvents(ctx, model.EventBatch{ClientID: cfg.ClientID, Events: events}); err != nil {
 		return err
 	}
+	log.Printf("uploaded %d event(s) to server %s", len(events), cfg.ServerURL)
 	ids := make([]string, 0, len(events))
 	for _, event := range events {
 		ids = append(ids, event.EventID)
@@ -174,6 +175,9 @@ func pollOnce(ctx context.Context, store *stateStore) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("received config from server %s: debug=%t idle_threshold=%ds upload=%ds poll=%ds",
+		cfg.ServerURL, serverConfig.DebugMode != nil && *serverConfig.DebugMode,
+		serverConfig.IdleThresholdSeconds, serverConfig.UploadIntervalSeconds, serverConfig.PollIntervalSeconds)
 	if err := store.update(func(cfg *config.Config) bool {
 		return cfg.ApplyServerConfig(serverConfig)
 	}); err != nil {
