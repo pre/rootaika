@@ -128,9 +128,14 @@ func TestBoardViewRenders(t *testing.T) {
 		t.Fatalf("status = %d", recorder.Code)
 	}
 	body := recorder.Body.String()
-	for _, want := range []string{"renderUsageChart", "renderProgramCharts", "setInterval", "/api/v1/charts/usage"} {
+	for _, want := range []string{"renderUsageChart", "initDayDashboard", "/api/v1/charts/usage", "kumulatiivinen tänään"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("board missing %q", want)
 		}
+	}
+	// The board keeps only the cumulative usage chart; the per-device program
+	// section now lives on the today page.
+	if strings.Contains(body, "Ohjelmat laitteittain") {
+		t.Fatalf("board should no longer carry the program section")
 	}
 }

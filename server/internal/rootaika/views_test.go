@@ -108,7 +108,7 @@ func TestDeviceLabel(t *testing.T) {
 	}
 }
 
-func TestDashboardRendersWithDeviceAndDebugCheckbox(t *testing.T) {
+func TestDashboardRendersTodayTableAndCharts(t *testing.T) {
 	app := testApp(t)
 	ctx := context.Background()
 	device, err := app.store.EnsureDevice(ctx, "client-1", app.now())
@@ -144,17 +144,18 @@ func TestDashboardRendersWithDeviceAndDebugCheckbox(t *testing.T) {
 	if strings.Contains(body, "<details class=\"device\" open>") {
 		t.Fatalf("device sections should be closed by default")
 	}
-	if !strings.Contains(body, `name="debug_mode"`) {
-		t.Fatalf("dashboard missing debug_mode checkbox")
+	// The today page now hosts the cumulative usage chart and per-device program
+	// charts via the shared init, instead of the admin controls (moved to /settings).
+	for _, want := range []string{"renderUsageChart", "renderProgramCharts", "initDayDashboard", "id=\"usage-chart\"", "id=\"device-select\""} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("dashboard missing %q", want)
+		}
 	}
-	if !strings.Contains(body, `name="debug_unassigned_clients"`) {
-		t.Fatalf("dashboard missing debug_unassigned_clients checkbox")
+	if strings.Contains(body, `name="debug_mode"`) {
+		t.Fatalf("dashboard should no longer carry the settings form")
 	}
-	if !strings.Contains(body, `/admin/devices/`+strconvInt(device.ID)+`/delete`) {
-		t.Fatalf("dashboard missing device delete form")
-	}
-	if !strings.Contains(body, `confirm('Poistetaanko laite ja sen tapahtumat pysyvästi?')`) {
-		t.Fatalf("dashboard missing device delete confirmation")
+	if strings.Contains(body, `/admin/devices/`) {
+		t.Fatalf("dashboard should no longer carry admin device forms")
 	}
 }
 
@@ -170,5 +171,51 @@ func TestDashboardClientIsReadOnly(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "read-only") {
 		t.Fatalf("client dashboard should be read-only")
+	}
+}
+
+func TestSettingsPageRendersAdminControls(t *testing.T) {
+	app := testApp(t)
+	ctx := context.Background()
+	device, err := app.store.EnsureDevice(ctx, "client-1", app.now())
+	if err != nil {
+		t.Fatalf("ensure device: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	request.SetBasicAuth("admin", "admin")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("settings status = %d", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `name="debug_mode"`) {
+		t.Fatalf("settings missing debug_mode checkbox")
+	}
+	if !strings.Contains(body, `name="debug_unassigned_clients"`) {
+		t.Fatalf("settings missing debug_unassigned_clients checkbox")
+	}
+	if !strings.Contains(body, `/admin/devices/`+strconvInt(device.ID)+`/delete`) {
+		t.Fatalf("settings missing device delete form")
+	}
+	if !strings.Contains(body, `confirm('Poistetaanko laite ja sen tapahtumat pysyvästi?')`) {
+		t.Fatalf("settings missing device delete confirmation")
+	}
+}
+
+func TestSettingsPageClientIsReadOnly(t *testing.T) {
+	app := testApp(t)
+	request := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	request.SetBasicAuth("client", "client")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("settings status = %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "read-only") {
+		t.Fatalf("client settings should be read-only")
 	}
 }

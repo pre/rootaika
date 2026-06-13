@@ -215,7 +215,7 @@ func (a *App) adminDeviceCommand(w http.ResponseWriter, r *http.Request, rawDevi
 		http.Error(w, "set device lock failed", http.StatusInternalServerError)
 		return
 	}
-	redirect(w, r, "/#devices")
+	redirect(w, r, "/settings#devices")
 }
 
 func (a *App) adminAssignDevice(w http.ResponseWriter, r *http.Request, rawDeviceID string) {
@@ -237,7 +237,7 @@ func (a *App) adminAssignDevice(w http.ResponseWriter, r *http.Request, rawDevic
 		http.Error(w, "update device failed", http.StatusInternalServerError)
 		return
 	}
-	redirect(w, r, "/#devices")
+	redirect(w, r, "/settings#devices")
 }
 
 func (a *App) adminDeleteDevice(w http.ResponseWriter, r *http.Request, rawDeviceID string) {
@@ -250,7 +250,7 @@ func (a *App) adminDeleteDevice(w http.ResponseWriter, r *http.Request, rawDevic
 		http.Error(w, "delete device failed", http.StatusInternalServerError)
 		return
 	}
-	redirect(w, r, "/#devices")
+	redirect(w, r, "/settings#devices")
 }
 
 func (a *App) adminSettings(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +263,7 @@ func (a *App) adminSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "update settings failed", http.StatusInternalServerError)
 		return
 	}
-	redirect(w, r, "/#settings")
+	redirect(w, r, "/settings#settings")
 }
 
 func (a *App) adminCreateCategory(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +272,7 @@ func (a *App) adminCreateCategory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	redirect(w, r, "/#categories")
+	redirect(w, r, "/settings#categories")
 }
 
 func (a *App) adminDeleteCategory(w http.ResponseWriter, r *http.Request, rawID string) {
@@ -285,7 +285,7 @@ func (a *App) adminDeleteCategory(w http.ResponseWriter, r *http.Request, rawID 
 		http.Error(w, "delete category failed", http.StatusInternalServerError)
 		return
 	}
-	redirect(w, r, "/#categories")
+	redirect(w, r, "/settings#categories")
 }
 
 func (a *App) adminCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +293,7 @@ func (a *App) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	redirect(w, r, "/#users")
+	redirect(w, r, "/settings#users")
 }
 
 func (a *App) adminRenameUser(w http.ResponseWriter, r *http.Request, rawUserID string) {
@@ -306,7 +306,7 @@ func (a *App) adminRenameUser(w http.ResponseWriter, r *http.Request, rawUserID 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	redirect(w, r, "/#users")
+	redirect(w, r, "/settings#users")
 }
 
 func settingsFromForm(r *http.Request) (Settings, error) {

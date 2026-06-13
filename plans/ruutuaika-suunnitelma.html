@@ -265,7 +265,7 @@
           <tr>
             <td>Reaaliaikainen taulunäkymä</td>
             <td>Ei suunnitelmassa.</td>
-            <td>Uusi <code>/board</code>-näkymä dedikoidulle ulkonäytölle: kaikkien laitteiden kumulatiivinen tänään-kuvaaja (x = kellonaika, y = kertynyt minuutti) sekä valitun laitteen ohjelmakohtaiset kuvaajat (aikasarja per ohjelma + top-ohjelmien pylväskuvaaja, <code>/api/v1/charts/programs</code>). Päivittyy pollaamalla JSON-endpointteja 30 s välein, ei websocketia (pysyy projektin no-deps-linjassa).</td>
+            <td>Uusi <code>/board</code>-näkymä dedikoidulle ulkonäytölle: kaikkien laitteiden kumulatiivinen tänään-kuvaaja (x = kellonaika, y = kertynyt minuutti). Päivittyy pollaamalla <code>/api/v1/charts/usage</code> 30 s välein, ei websocketia (pysyy projektin no-deps-linjassa). Aiemmin Taululla olleet ohjelmakohtaiset kuvaajat (aikasarja per ohjelma + top-ohjelmien pylväskuvaaja, <code>/api/v1/charts/programs</code>) siirretty Tänään-sivulle; sama JS-toteutus (<code>initDayDashboard</code>) jaetaan molempien sivujen kesken, ettei koodi kopioidu.</td>
             <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>
@@ -332,6 +332,12 @@
             <td>Verkon katkokset ja retry</td>
             <td>Jos serveri ei vastaa, eventit jäävät paikalliseen puskuriin ja lähetetään myöhemmin.</td>
             <td>Eventit puskuroidaan SQLiteen. HTTP-kutsuissa exponentiaalinen backoff (4 yritystä, 0,5 s → 5 s) transienteissa virheissä (verkkovirhe, 5xx, 429), ei 4xx:ssä. Todennettu Windowsilla serverin uudelleenkäynnistyksellä: puskuroidut eventit toimitettiin palautumisen jälkeen.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
+            <td>Admin-etusivun jako</td>
+            <td>Web-UI:n etusivu sisälsi sekä Tänään-erittelyn että laite-, käyttäjä-, asetus- ja kategoriahallinnan.</td>
+            <td>Etusivu (<code>/</code>) keskittyy tänään-näkymään: "Tänään, ohjelmat per laite" -taulukko sekä Taululta siirretyt kuvaajat (kumulatiivinen tänään + ohjelmakohtaiset). Hallinta-asiat (Laitteet, Käyttäjät, Asetukset, Kategoriat) siirretty omalle <code>/settings</code>-sivulle; admin-POSTit ohjaavat takaisin <code>/settings#ankkuri</code>. Navigaation "Asetukset" osoittaa <code>/settings</code>:iin.</td>
             <td><span class="status status-done">valmis</span></td>
           </tr>
         </tbody>

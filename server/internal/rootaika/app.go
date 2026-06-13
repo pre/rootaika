@@ -35,6 +35,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleMonth(w, r)
 	case r.URL.Path == "/board" && r.Method == http.MethodGet:
 		a.handleBoard(w, r)
+	case r.URL.Path == "/settings" && r.Method == http.MethodGet:
+		a.handleSettings(w, r)
 	case r.URL.Path == "/api/v1/charts/usage" && r.Method == http.MethodGet:
 		a.handleUsageChart(w, r)
 	case r.URL.Path == "/api/v1/charts/programs" && r.Method == http.MethodGet:

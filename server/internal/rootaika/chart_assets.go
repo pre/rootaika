@@ -1,16 +1,33 @@
 package rootaika
 
 // chartNav is the shared top navigation, identical on every page. Links are
-// absolute (with /#anchor for dashboard sections) so they work from any view.
+// absolute so they work from any view. Laitteet, Käyttäjät, Asetukset and
+// Kategoriat all live on the /settings page.
 const chartNav = `<nav class="inline">
         <a href="/">Tänään</a>
         <a href="/week">Viikko</a>
         <a href="/month">Kuukausi</a>
         <a href="/board">Taulu</a>
-        <a href="/#devices">Laitteet</a>
-        <a href="/#users">Käyttäjät</a>
-        <a href="/#settings">Asetukset</a>
+        <a href="/settings">Asetukset</a>
       </nav>`
+
+// chartElementsCSS styles the SVG charts and legend. It is shared by the chart
+// pages (via chartBaseCSS) and the dashboard, so the cumulative-today charts
+// look identical wherever they are embedded. It depends on the --grid, --axis,
+// --muted and --text custom properties being defined by the host stylesheet.
+const chartElementsCSS = `
+.legend { display:flex; flex-wrap:wrap; gap:14px; margin:4px 0 12px; }
+.legend label { display:inline-flex; align-items:center; gap:6px; font-size:.92rem; cursor:pointer; user-select:none; }
+.legend .sw { width:14px; height:14px; border-radius:3px; display:inline-block; flex:none; }
+.legend input { margin:0; }
+.legend label.off { opacity:.4; }
+svg { display:block; width:100%; height:auto; }
+.ax { font-size:11px; fill:var(--muted); }
+.gl { stroke:var(--grid); stroke-width:1; }
+.axline { stroke:var(--axis); stroke-width:1; }
+.barlabel { fill:var(--text); }
+.barval { fill:var(--muted); }
+`
 
 // chartBaseCSS is the shared stylesheet for the chart views. It mirrors the
 // palette used by the dashboard so the chart pages feel part of the same app.
@@ -29,19 +46,8 @@ p { margin:0 0 8px; }
 nav.inline { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .inline { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 select { min-height:34px; padding:5px 8px; border:1px solid var(--border); border-radius:6px; background:#fff; font:inherit; }
-.legend { display:flex; flex-wrap:wrap; gap:14px; margin:4px 0 12px; }
-.legend label { display:inline-flex; align-items:center; gap:6px; font-size:.92rem; cursor:pointer; user-select:none; }
-.legend .sw { width:14px; height:14px; border-radius:3px; display:inline-block; flex:none; }
-.legend input { margin:0; }
-.legend label.off { opacity:.4; }
-svg { display:block; width:100%; height:auto; }
-.ax { font-size:11px; fill:var(--muted); }
-.gl { stroke:var(--grid); stroke-width:1; }
-.axline { stroke:var(--axis); stroke-width:1; }
-.barlabel { fill:var(--text); }
-.barval { fill:var(--muted); }
 @media (max-width: 760px) { header { display:block; } }
-`
+` + chartElementsCSS
 
 // chartScript holds the shared client-side drawing code. It exposes
 // fetchJSON, renderUsageChart and renderProgramCharts on the page. All drawing
@@ -155,5 +161,62 @@ function renderProgramCharts(lineHost, barHost, data){
   var items=data.totals.map(function(t,i){ return { program:t.program, minutes:t.minutes, color:colorFor(i) }; });
   var xMax=0; items.forEach(function(it){ if(it.minutes>xMax) xMax=it.minutes; });
   drawBarChart(barHost, items, xMax || 1);
+}
+
+// initDayDashboard wires the cumulative "today" usage chart plus the per-device
+// program charts against the chart JSON endpoints. It is the single source of
+// truth shared by the Tänään page and the Taulu screen, so the two views never
+// drift apart. The argument is a map of element ids; every id is optional, so a
+// page can embed only the usage chart (Taulu) or the full set (Tänään). When
+// pollSeconds > 0 it refreshes on that interval, otherwise it loads once.
+function initDayDashboard(opts){
+  opts = opts || {};
+  var range='day';
+  var byId=function(id){ return id ? document.getElementById(id) : null; };
+  var chartHost=byId(opts.usageChart), legendHost=byId(opts.usageLegend), usageEmpty=byId(opts.usageEmpty);
+  var selectEl=byId(opts.deviceSelect), lineHost=byId(opts.programLine), barHost=byId(opts.programBar);
+  var programEmpty=byId(opts.programEmpty), updatedEl=byId(opts.updated);
+  var hasPrograms=selectEl && lineHost && barHost;
+  var selectedDevice=null, knownDevices='';
+
+  function loadPrograms(){
+    if(!hasPrograms) return;
+    if(!selectedDevice){ if(programEmpty) programEmpty.hidden=false; return; }
+    if(programEmpty) programEmpty.hidden=true;
+    fetchJSON('/api/v1/charts/programs?range='+range+'&device_id='+selectedDevice).then(function(data){
+      renderProgramCharts(lineHost, barHost, data);
+    }).catch(function(){});
+  }
+
+  function syncDeviceSelect(devices){
+    if(!hasPrograms) return;
+    var sig=devices.map(function(d){ return d.device_id+':'+d.name; }).join('|');
+    if(sig===knownDevices) return;
+    knownDevices=sig;
+    selectEl.innerHTML='';
+    devices.forEach(function(d){
+      var o=document.createElement('option'); o.value=d.device_id; o.textContent=d.name; selectEl.appendChild(o);
+    });
+    if(devices.length && !devices.some(function(d){ return String(d.device_id)===String(selectedDevice); })){
+      selectedDevice=devices[0].device_id; selectEl.value=selectedDevice;
+    }
+  }
+
+  if(hasPrograms){
+    selectEl.addEventListener('change', function(){ selectedDevice=selectEl.value; loadPrograms(); });
+  }
+
+  function loadUsage(){
+    fetchJSON('/api/v1/charts/usage?range='+range).then(function(data){
+      if(chartHost) renderUsageChart(chartHost, legendHost, data);
+      if(usageEmpty) usageEmpty.hidden = data.devices.length>0;
+      if(updatedEl) updatedEl.textContent = data.now;
+      syncDeviceSelect(data.devices);
+      loadPrograms();
+    }).catch(function(){});
+  }
+
+  loadUsage();
+  if(opts.pollSeconds>0) setInterval(loadUsage, opts.pollSeconds*1000);
 }
 `
