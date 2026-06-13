@@ -1,9 +1,10 @@
 # rootaika
 
-A screen-time tracking and enforcement system. It has two parts:
+A screen-time tracking and enforcement system. It has three parts:
 
 - **`server/`** – A Go HTTP server that receives client events, stores them in SQLite, and serves an HTML admin UI for reports, settings, and lock/unlock commands.
 - **`client-windows/`** – A Windows client made of two binaries: a background `rootaika-service` and a user-session `rootaika-agent`.
+- **`client-waveshare/`** – A Raspberry Pi + Waveshare e-ink display that shows today's per-device screen-time totals, fetched from the server as JSON.
 
 The client sends activity events to the server, polls for config and commands, and enforces screen locking.
 
@@ -190,6 +191,10 @@ The client uses these endpoints with Basic Auth (the `client` credentials):
 - `GET /api/v1/client/config?client_id=<uuid>`
 - `GET /api/v1/client/commands?client_id=<uuid>`
 - `POST /api/v1/client/commands/{command_id}/ack?client_id=<uuid>`
+
+The e-ink board client (`client-waveshare/`) uses the `client` credentials to read:
+
+- `GET /api/v1/board/today` – today's per-device active minutes plus the admin-configured refresh interval, as compact JSON.
 
 The local API between the agent and the service is protected by an `X-Rootaika-Agent-Token` header generated into the config.
 

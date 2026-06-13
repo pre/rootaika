@@ -172,6 +172,7 @@ func (s *Store) seed(ctx context.Context, now time.Time) error {
 		"poll_interval_seconds":     "30",
 		"max_countable_gap_seconds": "300",
 		"chart_y_max_minutes":       "720",
+		"board_refresh_seconds":     "60",
 		"debug_mode":                "0",
 		"debug_unassigned_clients":  "0",
 	}
@@ -525,7 +526,7 @@ func (s *Store) Settings(ctx context.Context) (Settings, error) {
 func (s *Store) UpdateSettings(ctx context.Context, settings Settings, now time.Time) error {
 	if settings.IdleThresholdSeconds <= 0 || settings.UploadIntervalSeconds <= 0 ||
 		settings.PollIntervalSeconds <= 0 || settings.MaxCountableGapSeconds <= 0 ||
-		settings.ChartYMaxMinutes <= 0 {
+		settings.ChartYMaxMinutes <= 0 || settings.BoardRefreshSeconds <= 0 {
 		return errors.New("settings must be positive integers")
 	}
 
@@ -541,6 +542,7 @@ func (s *Store) UpdateSettings(ctx context.Context, settings Settings, now time.
 		"poll_interval_seconds":     settings.PollIntervalSeconds,
 		"max_countable_gap_seconds": settings.MaxCountableGapSeconds,
 		"chart_y_max_minutes":       settings.ChartYMaxMinutes,
+		"board_refresh_seconds":     settings.BoardRefreshSeconds,
 		"debug_mode":                boolToInt(settings.DebugMode),
 		"debug_unassigned_clients":  boolToInt(settings.DebugUnassignedClients),
 	}
@@ -714,6 +716,7 @@ func settingsFromValues(values map[string]int) Settings {
 		PollIntervalSeconds:    defaultInt(values["poll_interval_seconds"], 30),
 		MaxCountableGapSeconds: defaultInt(values["max_countable_gap_seconds"], 300),
 		ChartYMaxMinutes:       defaultInt(values["chart_y_max_minutes"], 720),
+		BoardRefreshSeconds:    defaultInt(values["board_refresh_seconds"], 60),
 		DebugMode:              values["debug_mode"] != 0,
 		DebugUnassignedClients: values["debug_unassigned_clients"] != 0,
 	}

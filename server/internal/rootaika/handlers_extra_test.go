@@ -111,6 +111,7 @@ func TestHandleClientConfigReturnsDebugMode(t *testing.T) {
 		PollIntervalSeconds:    30,
 		MaxCountableGapSeconds: 300,
 		ChartYMaxMinutes:       720,
+		BoardRefreshSeconds:    60,
 		DebugMode:              true,
 	}, app.now()); err != nil {
 		t.Fatalf("update settings: %v", err)
@@ -144,6 +145,7 @@ func TestHandleClientConfigDebugsUnassignedClient(t *testing.T) {
 		PollIntervalSeconds:    30,
 		MaxCountableGapSeconds: 300,
 		ChartYMaxMinutes:       720,
+		BoardRefreshSeconds:    60,
 		DebugUnassignedClients: true,
 	}, app.now()); err != nil {
 		t.Fatalf("update settings: %v", err)
@@ -245,6 +247,7 @@ func TestHandleAdminRouting(t *testing.T) {
 		"poll_interval_seconds":     {"30"},
 		"max_countable_gap_seconds": {"300"},
 		"chart_y_max_minutes":       {"720"},
+		"board_refresh_seconds":     {"60"},
 		"debug_mode":                {"on"},
 		"debug_unassigned_clients":  {"on"},
 	}); rec.Code != http.StatusSeeOther {
@@ -308,6 +311,7 @@ func TestSettingsFromForm(t *testing.T) {
 		"poll_interval_seconds":     {"45"},
 		"max_countable_gap_seconds": {"600"},
 		"chart_y_max_minutes":       {"480"},
+		"board_refresh_seconds":     {"90"},
 		"debug_mode":                {"on"},
 		"debug_unassigned_clients":  {"on"},
 	}
@@ -326,6 +330,7 @@ func TestSettingsFromForm(t *testing.T) {
 		PollIntervalSeconds:    45,
 		MaxCountableGapSeconds: 600,
 		ChartYMaxMinutes:       480,
+		BoardRefreshSeconds:    90,
 		DebugMode:              true,
 		DebugUnassignedClients: true,
 	}
@@ -335,13 +340,14 @@ func TestSettingsFromForm(t *testing.T) {
 }
 
 func TestSettingsFromFormPropagatesError(t *testing.T) {
-	keys := []string{"idle_threshold_seconds", "upload_interval_seconds", "poll_interval_seconds", "max_countable_gap_seconds", "chart_y_max_minutes"}
+	keys := []string{"idle_threshold_seconds", "upload_interval_seconds", "poll_interval_seconds", "max_countable_gap_seconds", "chart_y_max_minutes", "board_refresh_seconds"}
 	base := url.Values{
 		"idle_threshold_seconds":    {"60"},
 		"upload_interval_seconds":   {"60"},
 		"poll_interval_seconds":     {"30"},
 		"max_countable_gap_seconds": {"300"},
 		"chart_y_max_minutes":       {"720"},
+		"board_refresh_seconds":     {"60"},
 	}
 	for _, key := range keys {
 		form := url.Values{}

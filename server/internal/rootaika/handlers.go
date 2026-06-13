@@ -330,12 +330,17 @@ func settingsFromForm(r *http.Request) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
+	boardRefresh, err := positiveIntForm(r, "board_refresh_seconds")
+	if err != nil {
+		return Settings{}, err
+	}
 	return Settings{
 		IdleThresholdSeconds:   idle,
 		UploadIntervalSeconds:  upload,
 		PollIntervalSeconds:    poll,
 		MaxCountableGapSeconds: maxGap,
 		ChartYMaxMinutes:       chartYMax,
+		BoardRefreshSeconds:    boardRefresh,
 		DebugMode:              checkboxForm(r, "debug_mode"),
 		DebugUnassignedClients: checkboxForm(r, "debug_unassigned_clients"),
 	}, nil

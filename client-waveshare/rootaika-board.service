@@ -1,0 +1,19 @@
+[Unit]
+Description=Rootaika e-ink board display
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust the path if you cloned the repo elsewhere.
+WorkingDirectory=/home/pi/rootaika/client-waveshare
+ExecStart=/usr/bin/python3 /home/pi/rootaika/client-waveshare/board_display.py
+Environment=ROOTAIKA_SERVER_URL=http://192.168.1.10:8080
+Environment=ROOTAIKA_CLIENT_USERNAME=client
+Environment=ROOTAIKA_CLIENT_PASSWORD=change-me
+Restart=always
+RestartSec=10
+User=pi
+
+[Install]
+WantedBy=multi-user.target

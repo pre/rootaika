@@ -48,7 +48,7 @@ func TestOpenStoreSeedsDefaults(t *testing.T) {
 		t.Fatalf("settings: %v", err)
 	}
 	if settings.IdleThresholdSeconds != 60 || settings.MaxCountableGapSeconds != 300 ||
-		settings.ChartYMaxMinutes != 720 ||
+		settings.ChartYMaxMinutes != 720 || settings.BoardRefreshSeconds != 60 ||
 		settings.DebugMode || settings.DebugUnassignedClients {
 		t.Fatalf("seeded settings = %+v", settings)
 	}
@@ -218,6 +218,7 @@ func TestClientConfigDebugsUnassignedClientsWhenEnabled(t *testing.T) {
 		PollIntervalSeconds:    30,
 		MaxCountableGapSeconds: 300,
 		ChartYMaxMinutes:       720,
+		BoardRefreshSeconds:    60,
 		DebugUnassignedClients: true,
 	}, fixedNow()); err != nil {
 		t.Fatalf("update settings: %v", err)
@@ -518,6 +519,7 @@ func TestUpdateSettingsPersistsAndRejectsNonPositive(t *testing.T) {
 		PollIntervalSeconds:    45,
 		MaxCountableGapSeconds: 600,
 		ChartYMaxMinutes:       480,
+		BoardRefreshSeconds:    90,
 		DebugMode:              true,
 		DebugUnassignedClients: true,
 	}
@@ -552,6 +554,12 @@ func TestUpdateSettingsPersistsAndRejectsNonPositive(t *testing.T) {
 	badChart.ChartYMaxMinutes = 0
 	if err := store.UpdateSettings(ctx, badChart, fixedNow()); err == nil {
 		t.Fatalf("expected error for non-positive chart_y_max_minutes")
+	}
+
+	badBoard := settings
+	badBoard.BoardRefreshSeconds = 0
+	if err := store.UpdateSettings(ctx, badBoard, fixedNow()); err == nil {
+		t.Fatalf("expected error for non-positive board_refresh_seconds")
 	}
 }
 

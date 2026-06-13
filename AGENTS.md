@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `rootaika` is a LAN screen-time tracking system for Windows gaming machines (target: 5-10 home PCs, scale is not a concern). A headless Windows client reports active usage to a Go HTTP server, which stores raw events in SQLite and renders an HTML admin/viewing UI plus a client API. The authoritative design and an "implementation vs. plan deviations" table live in `plans/ruutuaika-suunnitelma.html` (Finnish). Keep that deviations table updated when the implementation diverges from the plan.
 
-This is a monorepo with one directory per top-level component: `server/` and `client-windows/`. The plan, READMEs, and UI strings are in Finnish; code identifiers are English.
+This is a monorepo with one directory per top-level component: `server/`, `client-windows/`, and `client-waveshare/` (a Raspberry Pi + Waveshare e-ink board that reads `GET /api/v1/board/today` and shows today's per-device totals). The plan, READMEs, and UI strings are in Finnish; code identifiers are English.
 
 ## Commands
 
@@ -42,3 +42,4 @@ Windows-specific syscall wrappers (`*_windows.go`) do not compile/run under Linu
 - LAN-only, plain HTTP, no TLS by design. Don't add auth hardening or TLS without checking the plan's accepted security limitations.
 - New device-tunable settings default to the global `settings` table unless a per-device override is genuinely needed (`max_countable_gap_seconds` is global, not in `device_config`).
 - No pull request needed, merge git worktree branch into main using fast-forward. Remove the worktree and branch after successfully merging it into main.
+- Use English as the coding and documentation language.

@@ -81,6 +81,7 @@ type Settings struct {
 	PollIntervalSeconds    int
 	MaxCountableGapSeconds int
 	ChartYMaxMinutes       int
+	BoardRefreshSeconds    int
 	DebugMode              bool
 	DebugUnassignedClients bool
 }
