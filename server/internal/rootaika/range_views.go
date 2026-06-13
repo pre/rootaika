@@ -157,6 +157,10 @@ var rangeTemplate = template.Must(template.New("range").Funcs(template.FuncMap{
         <a href="/">Tänään</a>
         <a href="/week">Viikko</a>
         <a href="/month">Kuukausi</a>
+        <a href="/#devices">Laitteet</a>
+        <a href="/#users">Käyttäjät</a>
+        <a href="/#settings">Asetukset</a>
+        <a href="/#commands">Komennot</a>
       </nav>
     </header>
 
