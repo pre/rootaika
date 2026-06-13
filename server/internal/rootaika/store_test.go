@@ -378,6 +378,38 @@ func TestUsersCreateAndDedup(t *testing.T) {
 	}
 }
 
+func TestRenameUser(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+
+	if err := store.CreateUser(ctx, "Alice", fixedNow()); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	users, err := store.Users(ctx)
+	if err != nil {
+		t.Fatalf("users: %v", err)
+	}
+	userID := users[0].ID
+
+	if err := store.RenameUser(ctx, userID, "  Alicia  "); err != nil {
+		t.Fatalf("rename user: %v", err)
+	}
+	users, err = store.Users(ctx)
+	if err != nil {
+		t.Fatalf("users: %v", err)
+	}
+	if len(users) != 1 || users[0].Name != "Alicia" {
+		t.Fatalf("users = %+v", users)
+	}
+
+	if err := store.RenameUser(ctx, userID, "   "); err == nil {
+		t.Fatalf("expected error for empty name")
+	}
+	if err := store.RenameUser(ctx, 9999, "Ghost"); err == nil {
+		t.Fatalf("expected error for missing user")
+	}
+}
+
 func TestUpdateDeviceAssignsUserAndStatus(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()

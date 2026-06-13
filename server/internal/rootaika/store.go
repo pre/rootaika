@@ -467,6 +467,25 @@ ON CONFLICT(name) DO NOTHING`, name, formatDBTime(now))
 	return err
 }
 
+func (s *Store) RenameUser(ctx context.Context, userID int64, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("name is required")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET name = ? WHERE id = ?`, name, userID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return errors.New("user not found")
+	}
+	return nil
+}
+
 func (s *Store) UpdateDevice(ctx context.Context, deviceID int64, displayName string, userID *int64) error {
 	displayName = strings.TrimSpace(displayName)
 	status := "unassigned"

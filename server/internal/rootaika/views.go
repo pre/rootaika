@@ -313,9 +313,25 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
     <section id="users">
       <h2>Käyttäjät</h2>
       <table class="compact">
-        <thead><tr><th>ID</th><th>Nimi</th><th>Luotu</th></tr></thead>
+        <thead><tr><th>ID</th><th>Nimi</th><th>Luotu</th><th>Admin</th></tr></thead>
         <tbody>
-        {{range .Users}}<tr><td>{{.ID}}</td><td>{{.Name}}</td><td>{{formatTime .CreatedAt}}</td></tr>{{else}}<tr><td colspan="3" class="muted">Ei käyttäjiä.</td></tr>{{end}}
+        {{range .Users}}
+          <tr>
+            <td>{{.ID}}</td>
+            <td>{{.Name}}</td>
+            <td>{{formatTime .CreatedAt}}</td>
+            <td class="actions">
+              {{if $.ReadOnly}}<span class="muted">read-only</span>{{else}}
+              <form method="post" action="/admin/users/{{.ID}}/rename" class="inline">
+                <input name="name" value="{{.Name}}" aria-label="Käyttäjän nimi" required>
+                <button class="secondary" type="submit">Tallenna</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+        {{else}}
+          <tr><td colspan="4" class="muted">Ei käyttäjiä.</td></tr>
+        {{end}}
         </tbody>
       </table>
       {{if not .ReadOnly}}

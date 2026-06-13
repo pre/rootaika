@@ -191,6 +191,8 @@ func (a *App) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		a.adminDeleteCategory(w, r, parts[1])
 	case len(parts) == 1 && parts[0] == "users":
 		a.adminCreateUser(w, r)
+	case len(parts) == 3 && parts[0] == "users" && parts[2] == "rename":
+		a.adminRenameUser(w, r, parts[1])
 	default:
 		http.NotFound(w, r)
 	}
@@ -288,6 +290,19 @@ func (a *App) adminDeleteCategory(w http.ResponseWriter, r *http.Request, rawID 
 
 func (a *App) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.CreateUser(r.Context(), r.FormValue("name"), a.now()); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	redirect(w, r, "/#users")
+}
+
+func (a *App) adminRenameUser(w http.ResponseWriter, r *http.Request, rawUserID string) {
+	userID, err := strconv.ParseInt(rawUserID, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	if err := a.store.RenameUser(r.Context(), userID, r.FormValue("name")); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
