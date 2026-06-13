@@ -1,0 +1,19 @@
+services:
+  rootaika-server:
+    build:
+      context: ./server
+    image: rootaika-server:latest
+    environment:
+      ROOTAIKA_ADDR: "${ROOTAIKA_ADDR:-:8080}"
+      ROOTAIKA_DB_PATH: "${ROOTAIKA_DB_PATH:-rootaika.db}"
+      ROOTAIKA_ADMIN_USER: "${ROOTAIKA_ADMIN_USER:-admin}"
+      ROOTAIKA_ADMIN_PASSWORD: "${ROOTAIKA_ADMIN_PASSWORD:-admin}"
+      ROOTAIKA_CLIENT_USER: "${ROOTAIKA_CLIENT_USER:-client}"
+      ROOTAIKA_CLIENT_PASSWORD: "${ROOTAIKA_CLIENT_PASSWORD:-client}"
+    ports:
+      - "${ROOTAIKA_HOST_PORT:-8080}:8080"
+    volumes:
+      - rootaika-data:/data
+
+volumes:
+  rootaika-data:

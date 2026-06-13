@@ -8,7 +8,9 @@ RUN CGO_ENABLED=0 go build -o /out/rootaika-server ./cmd/rootaika-server
 
 FROM alpine:3.21
 
-RUN adduser -D -H rootaika
+RUN adduser -D -H rootaika \
+    && mkdir -p /data \
+    && chown rootaika:rootaika /data
 WORKDIR /data
 COPY --from=build /out/rootaika-server /usr/local/bin/rootaika-server
 
