@@ -188,11 +188,15 @@ func pollOnce(ctx context.Context, store *stateStore) error {
 	if err != nil {
 		return err
 	}
+	if len(commands) > 0 {
+		log.Printf("received %d command(s) from server", len(commands))
+	}
 	for _, command := range commands {
 		if err := handleCommand(store, command); err != nil {
-			log.Printf("command %s failed: %v", command.Identifier(), err)
+			log.Printf("command %s (%s) failed: %v", command.Identifier(), command.Type, err)
 			continue
 		}
+		log.Printf("command %s (%s) handled", command.Identifier(), command.Type)
 		if err := client.AckCommand(ctx, command.Identifier()); err != nil {
 			log.Printf("command %s ack failed: %v", command.Identifier(), err)
 		}
