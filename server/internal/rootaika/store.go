@@ -382,13 +382,32 @@ func (s *Store) CreateCommand(ctx context.Context, deviceID int64, commandType s
 	if !validCommand(commandType) {
 		return 0, fmt.Errorf("invalid command type %q", commandType)
 	}
-	result, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// Keep at most one pending command per device. A new command supersedes any
+	// still-pending command, so an unlock cancels a queued lock and vice versa.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM commands WHERE device_id = ? AND status = 'pending'`, deviceID); err != nil {
+		return 0, err
+	}
+	result, err := tx.ExecContext(ctx, `
 INSERT INTO commands(device_id, type, status, created_at_utc)
 VALUES (?, ?, 'pending', ?)`, deviceID, commandType, formatDBTime(now))
 	if err != nil {
 		return 0, err
 	}
-	return result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 func (s *Store) Devices(ctx context.Context) ([]Device, error) {

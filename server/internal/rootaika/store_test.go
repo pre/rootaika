@@ -281,6 +281,65 @@ func TestPendingCommandsOnlyReturnsPending(t *testing.T) {
 	}
 }
 
+func TestCreateCommandSupersedesPending(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+
+	if _, err := store.CreateCommand(ctx, device.ID, CommandLock, fixedNow()); err != nil {
+		t.Fatalf("create lock: %v", err)
+	}
+	// A second lock must not stack up another pending command.
+	if _, err := store.CreateCommand(ctx, device.ID, CommandLock, fixedNow()); err != nil {
+		t.Fatalf("create lock again: %v", err)
+	}
+	// An unlock supersedes the queued lock.
+	unlockID, err := store.CreateCommand(ctx, device.ID, CommandUnlock, fixedNow())
+	if err != nil {
+		t.Fatalf("create unlock: %v", err)
+	}
+
+	pending, err := store.PendingCommands(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("pending: %v", err)
+	}
+	if len(pending) != 1 || pending[0].ID != unlockID || pending[0].Type != CommandUnlock {
+		t.Fatalf("pending = %+v, want single unlock id=%d", pending, unlockID)
+	}
+}
+
+func TestCreateCommandKeepsAckedHistory(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+
+	lockID, err := store.CreateCommand(ctx, device.ID, CommandLock, fixedNow())
+	if err != nil {
+		t.Fatalf("create lock: %v", err)
+	}
+	if _, err := store.AckCommand(ctx, lockID, "client-1", fixedNow()); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+	// Superseding only removes pending commands; acked history survives.
+	if _, err := store.CreateCommand(ctx, device.ID, CommandUnlock, fixedNow()); err != nil {
+		t.Fatalf("create unlock: %v", err)
+	}
+
+	all, err := store.RecentCommands(ctx, 10)
+	if err != nil {
+		t.Fatalf("commands: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("commands = %+v, want lock(acked)+unlock(pending)", all)
+	}
+}
+
 func TestAckCommandSuccessAndIdempotent(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
