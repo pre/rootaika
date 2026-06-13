@@ -140,6 +140,37 @@ The default path is `C:\ProgramData\rootaika\client.json`. The first launch crea
 
 The environment variables `ROOTAIKA_SERVER_URL`, `ROOTAIKA_CLIENT_USERNAME`, `ROOTAIKA_CLIENT_PASSWORD`, and `ROOTAIKA_AGENT_LISTEN_ADDRESS` override the file values at runtime.
 
+### Running in debug mode
+
+Debug mode is read only from the config file's `debug_mode` field (or from the config the server pushes down). There is no command-line flag or environment variable for it. The binaries accept only `-config`. When the agent is built with `-H=windowsgui`, `debug_mode: true` opens a console window at runtime.
+
+To run against a specific server (for example `192.168.68.126:8080`) without touching the installed `C:\ProgramData\rootaika\client.json`, create a separate config such as `debug.json`:
+
+```json
+{
+  "server_url": "http://192.168.68.126:8080",
+  "client_username": "client",
+  "client_password": "change-me",
+  "agent_listen_address": "127.0.0.1:48611",
+  "debug_mode": true
+}
+```
+
+Then start both binaries against it in two separate windows:
+
+```powershell
+# Window 1: service
+.\rootaika-service.exe -config .\debug.json
+
+# Window 2: agent (debug_mode opens a console at runtime)
+.\rootaika-agent.exe -config .\debug.json
+```
+
+The service fills in any missing fields (`client_id`, `agent_token`, intervals, db path) and saves them back on first run. Notes:
+
+- If `rootaika-service` is already installed as a Windows service, stop it first (`sc stop rootaika-service` or `scripts\uninstall.ps1`) so two instances do not fight over the agent port (`48611`).
+- `ROOTAIKA_SERVER_URL` can override the server URL at runtime, but `debug_mode` has no environment override and must be set in the config file.
+
 For more detail, see [`client-windows/README.md`](client-windows/README.md) and [`server/README.md`](server/README.md).
 
 ---
