@@ -2,3 +2,6 @@ server/*.db
 .claude/worktrees/*
 __pycache__/
 *.pyc
+
+# ESP32 client config (WiFi + server credentials)
+client-wt32-sc01/RootaikaBoard/config.h

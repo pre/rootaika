@@ -1,0 +1,8 @@
+#pragma once
+// Copy this file to config.h and fill in your values.
+// config.h is gitignored and must not be committed.
+#define WIFI_SSID   "your-ssid"            // 2.4 GHz only (ESP32 has no 5 GHz)
+#define WIFI_PASS   "your-password"
+#define SERVER_URL  "http://192.168.1.10:8080"  // rootaika server base URL on the LAN
+#define BOARD_USER  "client"               // rootaika server client credentials
+#define BOARD_PASS  "client"
