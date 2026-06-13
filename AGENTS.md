@@ -41,3 +41,4 @@ Windows-specific syscall wrappers (`*_windows.go`) do not compile/run under Linu
 - Server has no third-party HTTP/router/ORM deps; SQLite via `modernc.org/sqlite` (pure Go, no cgo). Keep that constraint, it's what lets the server cross-compile and containerize cleanly.
 - LAN-only, plain HTTP, no TLS by design. Don't add auth hardening or TLS without checking the plan's accepted security limitations.
 - New device-tunable settings default to the global `settings` table unless a per-device override is genuinely needed (`max_countable_gap_seconds` is global, not in `device_config`).
+- No pull request needed, merge git worktree branch into main using fast-forward. Remove the worktree and branch after successfully merging it into main.
