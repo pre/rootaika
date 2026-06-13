@@ -1,103 +1,129 @@
 # rootaika Windows client
 
-MVP-client koostuu kahdesta Go-binääristä:
+The MVP client consists of two Go binaries:
 
-- `rootaika-service`: service-tyyppinen prosessi, joka säilyttää configin, puskuroi eventit paikalliseen SQLiteen, lähettää batchit serverille, pollaa configin ja komennot sekä pitää agentin käynnissä.
-- `rootaika-agent`: käyttäjäsessiossa ajettava agentti, joka lukee Windowsissa idle-ajan ja aktiivisen prosessin, lähettää `activity_observed`-eventit servicelle ja toteuttaa lock/unlock-pohjan.
+- `rootaika-service`: a service-style process that holds the config, buffers events in a local SQLite database, sends batches to the server, polls for config and commands, and keeps the agent running.
+- `rootaika-agent`: an agent that runs in the user session, reads idle time and the active process on Windows, sends `activity_observed` events to the service, and implements the lock/unlock base.
 
-## Konfiguraatio
+## Configuration
 
-Oletuspolku Windowsissa on:
+The default path on Windows is:
 
 ```powershell
 C:\ProgramData\rootaika\client.json
 ```
 
-Ensimmäinen käynnistys luo configin ja pysyvän `client_id`-UUID:n. Tärkeimmät kentät:
+The first launch creates the config and a persistent `client_id` UUID. The key fields:
 
 ```json
 {
   "server_url": "http://127.0.0.1:8080",
   "client_username": "client",
-  "client_password": "vaihda-tama",
+  "client_password": "change-me",
   "agent_listen_address": "127.0.0.1:48611"
 }
 ```
 
-Polun voi antaa molemmille binääreille:
+The path can be passed to both binaries:
 
 ```powershell
 .\rootaika-service.exe -config C:\ProgramData\rootaika\client.json
 .\rootaika-agent.exe -config C:\ProgramData\rootaika\client.json
 ```
 
-Ympäristömuuttujat `ROOTAIKA_SERVER_URL`, `ROOTAIKA_CLIENT_USERNAME`, `ROOTAIKA_CLIENT_PASSWORD` ja `ROOTAIKA_AGENT_LISTEN_ADDRESS` ohittavat tiedoston arvot ajonaikaisesti.
+The environment variables `ROOTAIKA_SERVER_URL`, `ROOTAIKA_CLIENT_USERNAME`, `ROOTAIKA_CLIENT_PASSWORD`, and `ROOTAIKA_AGENT_LISTEN_ADDRESS` override the file values at runtime.
 
 ## Build
 
-Kehityskoneella:
+On a development machine:
 
 ```sh
 go test ./...
 GOOS=windows GOARCH=amd64 go build ./cmd/rootaika-service ./cmd/rootaika-agent
 ```
 
-Windowsissa:
+On Windows:
 
 ```powershell
 go build .\cmd\rootaika-service
 go build .\cmd\rootaika-agent
 ```
 
-## Asennus PowerShell-skriptillä
+## Installation with the PowerShell script
 
-Hakemistossa `scripts/` on asennusautomaatio. Aja kaikki adminina (paitsi build).
+The `scripts/` directory contains installation automation. Run everything as admin (except the build).
 
-1. Käännä binäärit:
+1. Build the binaries:
 
 ```powershell
 .\scripts\build.ps1
 ```
 
-   Tämä tuottaa `dist\rootaika-service.exe` ja `dist\rootaika-agent.exe`. Agentti linkataan `-H=windowsgui`-lipulla, joten sillä ei ole konsoli-ikkunaa oletuksena. Debug-tila avaa konsolin ajonaikaisesti.
+   This produces `dist\rootaika-service.exe` and `dist\rootaika-agent.exe`. The agent is linked with the `-H=windowsgui` flag, so it has no console window by default. Debug mode opens a console at runtime.
 
-2. Asenna (avaa PowerShell adminina):
-
-```powershell
-.\scripts\install.ps1 -ServerUrl http://192.168.1.10:8080 -ClientPassword vaihda-tama
-```
-
-   Skripti:
-   - kopioi binäärit hakemistoon `C:\Program Files\rootaika`,
-   - kirjoittaa configin polkuun `C:\ProgramData\rootaika\client.json` (server-URL ja client-salasana mukana),
-   - rekisteröi `rootaika-service`-servicen auto-startilla ja crash recoveryllä (`restart/5000` kolmesti),
-   - rekisteröi agentin käynnistymään käyttäjän kirjautuessa (HKLM `Run`),
-   - käynnistää servicen ja agentin heti.
-
-3. Poista asennus:
+2. Install (open PowerShell as admin):
 
 ```powershell
-.\scripts\uninstall.ps1          # poistaa servicen ja autostartin
-.\scripts\uninstall.ps1 -Purge   # poistaa myös binäärit ja configin/puskurin
+.\scripts\install.ps1 -ServerUrl http://192.168.1.10:8080 -ClientPassword change-me
 ```
 
-Service ajetaan LocalSystem-tilillä ja avaa vain localhostiin sidotun agentti-endpointin. Agentti ajetaan käyttäjäsessiossa (service toimii watchdogina ja yrittää käynnistää agentin uudelleen, jos se sammuu).
+   The script:
+   - copies the binaries to `C:\Program Files\rootaika`,
+   - writes the config to `C:\ProgramData\rootaika\client.json` (including the server URL and client password),
+   - registers the `rootaika-service` service with auto-start and crash recovery (`restart/5000` three times),
+   - registers the agent to start when the user logs in (HKLM `Run`),
+   - starts the service and the agent immediately.
 
-### Verkon katkokset ja serverin uudelleenkäynnistys
+3. Uninstall:
 
-Client kestää lyhyet verkkokatkokset ja serverin uudelleenkäynnistykset:
+```powershell
+.\scripts\uninstall.ps1          # removes the service and the autostart entry
+.\scripts\uninstall.ps1 -Purge   # also removes the binaries and the config/buffer
+```
 
-- Eventit puskuroidaan paikalliseen SQLite-tiedostoon (`rootaika-client.db`), ja merkitään lähetetyiksi vasta onnistuneen lähetyksen jälkeen. Lähettämättömät eventit jäävät jonoon, kunnes server vastaa.
-- HTTP-kutsut (event-lähetys, config- ja komento-polling) yrittävät uudelleen exponentiaalisella backoffilla (oletuksena 4 yritystä, 0,5 s → 5 s) transienteissa virheissä: verkkovirheet, 5xx ja 429. 4xx-virheitä ei yritetä uudelleen.
-- Tämä silloittaa serverin uudelleenkäynnistyksen sekunneissa sen sijaan, että odotettaisiin seuraavaa upload-sykliä.
+The service runs under the LocalSystem account and only opens an agent endpoint bound to localhost. The agent runs in the user session (the service acts as a watchdog and tries to restart the agent if it stops).
+
+## Test run with the PowerShell script
+
+The `scripts\test-run.ps1` script runs a lightweight test session with a single command, without an actual installation (no service, no registrations). It copies the binaries into a local temp directory, sets hard-coded environment variables, and starts the service, which starts the agent via its watchdog. The server address and credentials are hard-coded inside the script.
+
+1. Cross-compile the Windows binaries in WSL first:
+
+```sh
+cd client-windows
+GOOS=windows GOARCH=amd64 go build -o dist/rootaika-service.exe ./cmd/rootaika-service
+GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o dist/rootaika-agent.exe ./cmd/rootaika-agent
+```
+
+2. Run the script on the Windows side in PowerShell as a **normal user** (not as admin), so the agent sees the same session as your browser:
+
+```powershell
+& "\\wsl.localhost\Ubuntu-24.04\home\prepo\dev\oma\rootaika\client-windows\scripts\test-run.ps1"
+```
+
+   If the execution policy blocks it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "\\wsl.localhost\Ubuntu-24.04\home\prepo\dev\oma\rootaika\client-windows\scripts\test-run.ps1"
+```
+
+By default the script uses the temp directory `%TEMP%\rootaika-test`. Using the same directory on every run means a persistent `client_id`, so the server sees the same device across reruns. Stop with `Ctrl+C`. The server and credential defaults can be changed by editing the variables at the top of the script; `-DistDir` and `-WorkDir` can be passed as parameters if your WSL distro or working directory differs from the default.
+
+### Network outages and server restarts
+
+The client tolerates short network outages and server restarts:
+
+- Events are buffered in a local SQLite file (`rootaika-client.db`) and marked as sent only after a successful upload. Unsent events stay queued until the server responds.
+- HTTP calls (event upload, config and command polling) retry with exponential backoff (4 attempts by default, 0.5 s → 5 s) on transient errors: network errors, 5xx, and 429. 4xx errors are not retried.
+- This bridges a server restart in seconds instead of waiting for the next upload cycle.
 
 ## Server API
 
-Client käyttää suunnitelman endpointteja Basic Authilla:
+The client uses the planned endpoints with Basic Auth:
 
 - `POST /api/v1/events/batch`
 - `GET /api/v1/client/config?client_id=...`
 - `GET /api/v1/client/commands?client_id=...`
 - `POST /api/v1/client/commands/{command_id}/ack`
 
-Agentin ja servicen välinen paikallinen API on suojattu configiin generoidulla `X-Rootaika-Agent-Token`-headerilla.
+The local API between the agent and the service is protected with an `X-Rootaika-Agent-Token` header generated into the config.
