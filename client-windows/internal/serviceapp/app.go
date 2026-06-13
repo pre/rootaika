@@ -190,7 +190,11 @@ func pollOnce(ctx context.Context, store *stateStore) error {
 		return err
 	}
 	if len(commands) > 0 {
-		log.Printf("received %d command(s) from server", len(commands))
+		summaries := make([]string, 0, len(commands))
+		for _, command := range commands {
+			summaries = append(summaries, fmt.Sprintf("%s (%s)", command.Identifier(), command.Type))
+		}
+		log.Printf("received %d command(s) from server: %s", len(commands), strings.Join(summaries, ", "))
 	}
 	for _, command := range commands {
 		if err := handleCommand(store, command); err != nil {
