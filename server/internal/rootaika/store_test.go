@@ -257,15 +257,15 @@ func TestSetDeviceLockPersistsInConfig(t *testing.T) {
 		t.Fatalf("ensure: %v", err)
 	}
 
-	if err := store.SetDeviceLock(ctx, device.ID, true, "Aika lopettaa", fixedNow()); err != nil {
+	if err := store.SetDeviceLock(ctx, device.ID, true, "Aika lopettaa", 30, fixedNow()); err != nil {
 		t.Fatalf("lock: %v", err)
 	}
 	config, err := store.ClientConfig(ctx, "client-1", fixedNow())
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
-	if !config.Locked || config.LockMessage != "Aika lopettaa" {
-		t.Fatalf("config = %+v, want locked with message", config)
+	if !config.Locked || config.LockMessage != "Aika lopettaa" || config.WarningSeconds != 30 {
+		t.Fatalf("config = %+v, want locked with message and warning", config)
 	}
 }
 
@@ -277,25 +277,25 @@ func TestSetDeviceLockUnlockClearsMessage(t *testing.T) {
 		t.Fatalf("ensure: %v", err)
 	}
 
-	if err := store.SetDeviceLock(ctx, device.ID, true, "Aika lopettaa", fixedNow()); err != nil {
+	if err := store.SetDeviceLock(ctx, device.ID, true, "Aika lopettaa", 30, fixedNow()); err != nil {
 		t.Fatalf("lock: %v", err)
 	}
-	if err := store.SetDeviceLock(ctx, device.ID, false, "", fixedNow()); err != nil {
+	if err := store.SetDeviceLock(ctx, device.ID, false, "", 0, fixedNow()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
 	config, err := store.ClientConfig(ctx, "client-1", fixedNow())
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
-	if config.Locked || config.LockMessage != "" {
-		t.Fatalf("config = %+v, want unlocked with empty message", config)
+	if config.Locked || config.LockMessage != "" || config.WarningSeconds != 0 {
+		t.Fatalf("config = %+v, want unlocked with empty message and no warning", config)
 	}
 }
 
 func TestSetDeviceLockUnknownDevice(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
-	if err := store.SetDeviceLock(ctx, 99999, true, "", fixedNow()); err == nil {
+	if err := store.SetDeviceLock(ctx, 99999, true, "", 0, fixedNow()); err == nil {
 		t.Fatalf("expected error for unknown device")
 	}
 }
@@ -307,7 +307,7 @@ func TestDevicesReportLockState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if err := store.SetDeviceLock(ctx, device.ID, true, "", fixedNow()); err != nil {
+	if err := store.SetDeviceLock(ctx, device.ID, true, "", 0, fixedNow()); err != nil {
 		t.Fatalf("lock: %v", err)
 	}
 
@@ -405,7 +405,7 @@ func TestDeleteDeviceRemovesDeviceAndRelatedRows(t *testing.T) {
 	}, fixedNow()); err != nil {
 		t.Fatalf("insert events: %v", err)
 	}
-	if err := store.SetDeviceLock(ctx, device.ID, true, "", fixedNow()); err != nil {
+	if err := store.SetDeviceLock(ctx, device.ID, true, "", 0, fixedNow()); err != nil {
 		t.Fatalf("set device lock: %v", err)
 	}
 

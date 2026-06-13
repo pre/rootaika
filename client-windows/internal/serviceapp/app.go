@@ -69,6 +69,7 @@ func startAgentHTTP(ctx context.Context, store *stateStore, eventBuffer *buffer.
 		writeJSON(w, http.StatusOK, agentStateResponse{
 			Locked:                 cfg.Locked,
 			LockMessage:            cfg.LockMessage,
+			LockWarningSeconds:     cfg.LockWarningSeconds,
 			IdleThresholdSeconds:   cfg.IdleThresholdSeconds,
 			ObserveIntervalSeconds: cfg.ObserveIntervalSeconds,
 			DebugMode:              cfg.DebugMode,
@@ -256,6 +257,7 @@ type agentEventsRequest struct {
 type agentStateResponse struct {
 	Locked                 bool   `json:"locked"`
 	LockMessage            string `json:"lock_message"`
+	LockWarningSeconds     int    `json:"lock_warning_seconds"`
 	IdleThresholdSeconds   int    `json:"idle_threshold_seconds"`
 	ObserveIntervalSeconds int    `json:"observe_interval_seconds"`
 	DebugMode              bool   `json:"debug_mode"`

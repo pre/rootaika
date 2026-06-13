@@ -68,6 +68,7 @@ type ClientConfig struct {
 	DebugMode              bool
 	Locked                 bool
 	LockMessage            string
+	WarningSeconds         int
 	Categories             []ProgramCategory
 }
 

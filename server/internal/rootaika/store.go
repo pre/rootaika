@@ -88,7 +88,8 @@ CREATE TABLE IF NOT EXISTS device_config (
   upload_interval_seconds INTEGER NOT NULL,
   poll_interval_seconds INTEGER NOT NULL,
   locked INTEGER NOT NULL DEFAULT 0,
-  lock_message TEXT NOT NULL DEFAULT ''
+  lock_message TEXT NOT NULL DEFAULT '',
+  warning_seconds INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS program_categories (
@@ -119,7 +120,10 @@ CREATE TABLE IF NOT EXISTS auth_credentials (
 	if err := s.ensureColumn(ctx, "device_config", "locked", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	return s.ensureColumn(ctx, "device_config", "lock_message", "TEXT NOT NULL DEFAULT ''")
+	if err := s.ensureColumn(ctx, "device_config", "lock_message", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.ensureColumn(ctx, "device_config", "warning_seconds", "INTEGER NOT NULL DEFAULT 0")
 }
 
 // ensureColumn adds a column to an existing table when it is missing, so older
@@ -328,10 +332,10 @@ func (s *Store) ClientConfig(ctx context.Context, clientUUID string, now time.Ti
 	var config ClientConfig
 	config.DeviceID = device.ID
 	err = s.db.QueryRowContext(ctx, `
-SELECT idle_threshold_seconds, upload_interval_seconds, poll_interval_seconds, locked, lock_message
+SELECT idle_threshold_seconds, upload_interval_seconds, poll_interval_seconds, locked, lock_message, warning_seconds
 FROM device_config WHERE device_id = ?`, device.ID).
 		Scan(&config.IdleThresholdSeconds, &config.UploadIntervalSeconds, &config.PollIntervalSeconds,
-			&config.Locked, &config.LockMessage)
+			&config.Locked, &config.LockMessage, &config.WarningSeconds)
 	if err != nil {
 		return ClientConfig{}, err
 	}
@@ -354,13 +358,14 @@ FROM device_config WHERE device_id = ?`, device.ID).
 // SetDeviceLock sets the persistent lock state for a device. The client reads it
 // from its config on every poll, so lock is a continuous state rather than a
 // one-shot command: the overlay reappears whenever the device is locked.
-func (s *Store) SetDeviceLock(ctx context.Context, deviceID int64, locked bool, message string, now time.Time) error {
+func (s *Store) SetDeviceLock(ctx context.Context, deviceID int64, locked bool, message string, warningSeconds int, now time.Time) error {
 	if !locked {
 		message = ""
+		warningSeconds = 0
 	}
 	result, err := s.db.ExecContext(ctx, `
-UPDATE device_config SET locked = ?, lock_message = ? WHERE device_id = ?`,
-		boolToInt(locked), message, deviceID)
+UPDATE device_config SET locked = ?, lock_message = ?, warning_seconds = ? WHERE device_id = ?`,
+		boolToInt(locked), message, warningSeconds, deviceID)
 	if err != nil {
 		return err
 	}

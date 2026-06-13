@@ -46,4 +46,5 @@ type ClientConfig struct {
 	DebugMode              *bool  `json:"debug_mode,omitempty"`
 	Locked                 *bool  `json:"locked,omitempty"`
 	LockMessage            string `json:"lock_message,omitempty"`
+	WarningSeconds         int    `json:"warning_seconds,omitempty"`
 }

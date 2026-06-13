@@ -41,6 +41,7 @@ type Config struct {
 	BatchSize              int    `json:"batch_size"`
 	Locked                 bool   `json:"locked"`
 	LockMessage            string `json:"lock_message,omitempty"`
+	LockWarningSeconds     int    `json:"lock_warning_seconds,omitempty"`
 	DebugMode              bool   `json:"debug_mode"`
 }
 
@@ -163,11 +164,17 @@ func (c *Config) ApplyServerConfig(sc model.ClientConfig) bool {
 			changed = true
 		}
 		message := sc.LockMessage
+		warning := sc.WarningSeconds
 		if !*sc.Locked {
 			message = ""
+			warning = 0
 		}
 		if c.LockMessage != message {
 			c.LockMessage = message
+			changed = true
+		}
+		if c.LockWarningSeconds != warning {
+			c.LockWarningSeconds = warning
 			changed = true
 		}
 	}

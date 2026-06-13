@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// maxWarningSeconds caps the lock warning countdown the admin can request, so a
+// typo cannot leave a device unlockable for an unreasonable time (10 minutes).
+const maxWarningSeconds = 600
+
 type batchRequest struct {
 	ClientID string              `json:"client_id"`
 	Events   []batchEventRequest `json:"events"`
@@ -144,6 +148,7 @@ func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 		"debug_mode":                config.DebugMode,
 		"locked":                    config.Locked,
 		"lock_message":              config.LockMessage,
+		"warning_seconds":           config.WarningSeconds,
 		"categories":                categories,
 	})
 }
@@ -191,10 +196,12 @@ func (a *App) adminDeviceCommand(w http.ResponseWriter, r *http.Request, rawDevi
 	}
 	locked := commandType == "lock"
 	message := ""
+	warningSeconds := 0
 	if locked {
 		message = strings.TrimSpace(r.FormValue("message"))
+		warningSeconds = clampWarningSeconds(r.FormValue("warning_seconds"))
 	}
-	if err := a.store.SetDeviceLock(r.Context(), deviceID, locked, message, a.now()); err != nil {
+	if err := a.store.SetDeviceLock(r.Context(), deviceID, locked, message, warningSeconds, a.now()); err != nil {
 		http.Error(w, "set device lock failed", http.StatusInternalServerError)
 		return
 	}
@@ -313,6 +320,20 @@ func checkboxForm(r *http.Request, key string) bool {
 	default:
 		return false
 	}
+}
+
+// clampWarningSeconds parses the lock warning duration from the admin form,
+// clamping it to 0..maxWarningSeconds. A blank or invalid value means no
+// warning (lock immediately).
+func clampWarningSeconds(raw string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 0 {
+		return 0
+	}
+	if value > maxWarningSeconds {
+		return maxWarningSeconds
+	}
+	return value
 }
 
 func positiveIntForm(r *http.Request, key string) (int, error) {

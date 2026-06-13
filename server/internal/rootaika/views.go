@@ -284,6 +284,7 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
               </form>
               <form method="post" action="/admin/devices/{{.Device.ID}}/lock" class="stack">
                 <input name="message" placeholder="Viesti lukitusruudulle" aria-label="Lukitusviesti">
+                <input name="warning_seconds" type="number" min="0" max="600" value="60" aria-label="Varoitusaika sekunteina" title="Varoitusaika sekunteina ennen lukitusta (0 = lukitse heti)">
                 <button class="warn" type="submit">Lock</button>
               </form>
               <form method="post" action="/admin/devices/{{.Device.ID}}/unlock"><button type="submit">Unlock</button></form>

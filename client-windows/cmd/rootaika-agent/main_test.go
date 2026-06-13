@@ -48,7 +48,7 @@ func TestEventFromSnapshot(t *testing.T) {
 
 	t.Run("locked overrides", func(t *testing.T) {
 		snap := activity.Snapshot{At: at, ForegroundProcess: `C:\app.exe`, IdleFor: time.Hour}
-		ev := eventFromSnapshot(snap, serviceState{Locked: true, IdleThresholdSeconds: 60})
+		ev := eventFromSnapshot(snap, serviceState{Locked: true, IdleThresholdSeconds: 60}, true)
 		if ev.State != model.StateLocked {
 			t.Fatalf("locked state expected, got %s", ev.State)
 		}
@@ -57,9 +57,22 @@ func TestEventFromSnapshot(t *testing.T) {
 		}
 	})
 
+	t.Run("warning countdown still counts as active", func(t *testing.T) {
+		// Server intends a lock (state.Locked) but the screen is not yet locked
+		// because the warning countdown is running, so play is still counted.
+		snap := activity.Snapshot{At: at, ForegroundProcess: `C:\Games\Steam.EXE`, IdleFor: time.Second}
+		ev := eventFromSnapshot(snap, serviceState{Locked: true, LockWarningSeconds: 60, IdleThresholdSeconds: 60}, false)
+		if ev.State != model.StateActive {
+			t.Fatalf("active expected during warning, got %s", ev.State)
+		}
+		if ev.ProcessName != "steam.exe" {
+			t.Fatalf("process not normalized during warning, got %q", ev.ProcessName)
+		}
+	})
+
 	t.Run("idle when threshold reached", func(t *testing.T) {
 		snap := activity.Snapshot{At: at, ForegroundProcess: "x", IdleFor: 90 * time.Second}
-		ev := eventFromSnapshot(snap, serviceState{IdleThresholdSeconds: 60})
+		ev := eventFromSnapshot(snap, serviceState{IdleThresholdSeconds: 60}, false)
 		if ev.State != model.StateIdle {
 			t.Fatalf("idle expected, got %s", ev.State)
 		}
@@ -67,7 +80,7 @@ func TestEventFromSnapshot(t *testing.T) {
 
 	t.Run("active sets normalized process", func(t *testing.T) {
 		snap := activity.Snapshot{At: at, ForegroundProcess: `C:\Games\Steam.EXE`, IdleFor: time.Second}
-		ev := eventFromSnapshot(snap, serviceState{IdleThresholdSeconds: 60})
+		ev := eventFromSnapshot(snap, serviceState{IdleThresholdSeconds: 60}, false)
 		if ev.State != model.StateActive {
 			t.Fatalf("active expected, got %s", ev.State)
 		}
@@ -78,19 +91,19 @@ func TestEventFromSnapshot(t *testing.T) {
 
 	t.Run("zero threshold falls back to 60s", func(t *testing.T) {
 		snap := activity.Snapshot{At: at, ForegroundProcess: "x", IdleFor: 59 * time.Second}
-		ev := eventFromSnapshot(snap, serviceState{IdleThresholdSeconds: 0})
+		ev := eventFromSnapshot(snap, serviceState{IdleThresholdSeconds: 0}, false)
 		if ev.State != model.StateActive {
 			t.Fatalf("59s idle below 60s fallback should be active, got %s", ev.State)
 		}
 		snap.IdleFor = 60 * time.Second
-		ev = eventFromSnapshot(snap, serviceState{IdleThresholdSeconds: 0})
+		ev = eventFromSnapshot(snap, serviceState{IdleThresholdSeconds: 0}, false)
 		if ev.State != model.StateIdle {
 			t.Fatalf("60s idle at 60s fallback should be idle, got %s", ev.State)
 		}
 	})
 
 	t.Run("zero At gets filled", func(t *testing.T) {
-		ev := eventFromSnapshot(activity.Snapshot{ForegroundProcess: "x"}, serviceState{IdleThresholdSeconds: 60})
+		ev := eventFromSnapshot(activity.Snapshot{ForegroundProcess: "x"}, serviceState{IdleThresholdSeconds: 60}, false)
 		if ev.OccurredAt.IsZero() {
 			t.Fatalf("OccurredAt should be filled when snapshot has zero time")
 		}

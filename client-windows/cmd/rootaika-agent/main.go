@@ -57,6 +57,7 @@ func run(ctx context.Context, cfgPath string) error {
 	state := serviceState{
 		Locked:                 cfg.Locked,
 		LockMessage:            cfg.LockMessage,
+		LockWarningSeconds:     cfg.LockWarningSeconds,
 		IdleThresholdSeconds:   cfg.IdleThresholdSeconds,
 		ObserveIntervalSeconds: cfg.ObserveIntervalSeconds,
 		DebugMode:              cfg.DebugMode,
@@ -67,26 +68,82 @@ func run(ctx context.Context, cfgPath string) error {
 	var last *model.Event
 	var lastSentAt time.Time
 
+	// Lock warning state. When the server requests a lock with LockWarningSeconds
+	// > 0, the agent first runs a non-blocking countdown (TTS + click-through
+	// overlay) in a goroutine so the game stays playable, and only engages the
+	// black lock overlay once the countdown elapses. An unlock during the
+	// countdown cancels it.
+	var (
+		warnCancel context.CancelFunc
+		warnDone   chan struct{}
+		warning    bool
+		warned     bool
+	)
+
 	for {
 		if latest, err := local.fetchState(ctx); err == nil {
 			state = latest
-			log.Printf("received state from service: debug=%t locked=%t idle_threshold=%ds observe=%ds",
-				state.DebugMode, state.Locked, state.IdleThresholdSeconds, state.ObserveIntervalSeconds)
+			log.Printf("received state from service: debug=%t locked=%t warning=%ds idle_threshold=%ds observe=%ds",
+				state.DebugMode, state.Locked, state.LockWarningSeconds, state.IdleThresholdSeconds, state.ObserveIntervalSeconds)
 		} else {
 			log.Printf("fetch service state failed: %v", err)
 		}
 		if err := console.SetVisible(state.DebugMode); err != nil {
 			log.Printf("set console visibility failed: %v", err)
 		}
-		if err := locker.SetLocked(ctx, state.Locked, state.LockMessage); err != nil {
-			log.Printf("set locked state failed: %v", err)
+
+		// screenLocked is the actual overlay state, which lags state.Locked while a
+		// warning countdown is in progress. The reported activity event uses this,
+		// not the server intent, so play during the countdown is still counted.
+		screenLocked := false
+		if state.Locked {
+			switch {
+			case warned || state.LockWarningSeconds <= 0:
+				if err := locker.SetLocked(ctx, true, state.LockMessage); err != nil {
+					log.Printf("set locked state failed: %v", err)
+				}
+				screenLocked = true
+			case warning:
+				select {
+				case <-warnDone:
+					warning = false
+					warned = true
+					if err := locker.SetLocked(ctx, true, state.LockMessage); err != nil {
+						log.Printf("set locked state failed: %v", err)
+					}
+					screenLocked = true
+				default:
+				}
+			default:
+				wctx, cancel := context.WithCancel(ctx)
+				warnCancel = cancel
+				warnDone = make(chan struct{})
+				warning = true
+				go func(msg string, secs int, done chan struct{}) {
+					defer close(done)
+					if err := locker.Warn(wctx, msg, secs); err != nil {
+						log.Printf("lock warning failed: %v", err)
+					}
+				}(state.LockMessage, state.LockWarningSeconds, warnDone)
+				log.Printf("lock warning started: %ds", state.LockWarningSeconds)
+			}
+		} else {
+			if warnCancel != nil {
+				warnCancel()
+				warnCancel = nil
+			}
+			warning = false
+			warned = false
+			if err := locker.SetLocked(ctx, false, ""); err != nil {
+				log.Printf("set locked state failed: %v", err)
+			}
 		}
 
 		snapshot, err := probe.Snapshot(ctx)
 		if err != nil {
 			log.Printf("activity probe failed: %v", err)
 		} else {
-			event := eventFromSnapshot(snapshot, state)
+			event := eventFromSnapshot(snapshot, state, screenLocked)
 			if shouldEmit(last, event, lastSentAt, event.OccurredAt, heartbeat) {
 				if err := local.postEvent(ctx, event); err != nil {
 					log.Printf("post event to service failed: %v", err)
@@ -127,7 +184,10 @@ func shouldEmit(last *model.Event, current model.Event, lastSentAt, now time.Tim
 	return !now.Before(lastSentAt.Add(heartbeat))
 }
 
-func eventFromSnapshot(snapshot activity.Snapshot, state serviceState) model.Event {
+// eventFromSnapshot maps an activity snapshot to a reportable event. locked is
+// the actual screen-overlay state, which is false during a lock warning
+// countdown so the playable grace period is still counted as usage.
+func eventFromSnapshot(snapshot activity.Snapshot, state serviceState, locked bool) model.Event {
 	if snapshot.At.IsZero() {
 		snapshot.At = time.Now().UTC()
 	}
@@ -136,7 +196,7 @@ func eventFromSnapshot(snapshot activity.Snapshot, state serviceState) model.Eve
 		OccurredAt: snapshot.At.UTC(),
 		State:      model.StateActive,
 	}
-	if state.Locked {
+	if locked {
 		event.State = model.StateLocked
 		return event
 	}
@@ -232,6 +292,7 @@ func (c localClient) endpoint(endpointPath string) string {
 type serviceState struct {
 	Locked                 bool   `json:"locked"`
 	LockMessage            string `json:"lock_message"`
+	LockWarningSeconds     int    `json:"lock_warning_seconds"`
 	IdleThresholdSeconds   int    `json:"idle_threshold_seconds"`
 	ObserveIntervalSeconds int    `json:"observe_interval_seconds"`
 	DebugMode              bool   `json:"debug_mode"`

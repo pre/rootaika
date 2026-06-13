@@ -70,3 +70,23 @@ func TestApplyServerConfigOnlyUsesPositiveValues(t *testing.T) {
 		t.Fatalf("server config not applied: %+v", cfg)
 	}
 }
+
+func TestApplyServerConfigLockWarning(t *testing.T) {
+	cfg := &Config{}
+	locked := true
+
+	if !cfg.ApplyServerConfig(model.ClientConfig{Locked: &locked, LockMessage: "Aika lopettaa", WarningSeconds: 60}) {
+		t.Fatalf("expected lock to change config")
+	}
+	if !cfg.Locked || cfg.LockMessage != "Aika lopettaa" || cfg.LockWarningSeconds != 60 {
+		t.Fatalf("lock not applied: %+v", cfg)
+	}
+
+	unlocked := false
+	if !cfg.ApplyServerConfig(model.ClientConfig{Locked: &unlocked, LockMessage: "Aika lopettaa", WarningSeconds: 60}) {
+		t.Fatalf("expected unlock to change config")
+	}
+	if cfg.Locked || cfg.LockMessage != "" || cfg.LockWarningSeconds != 0 {
+		t.Fatalf("unlock should clear message and warning: %+v", cfg)
+	}
+}

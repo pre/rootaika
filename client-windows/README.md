@@ -83,6 +83,25 @@ The `scripts/` directory contains installation automation. Run everything as adm
 
 The service runs under the LocalSystem account and only opens an agent endpoint bound to localhost. The agent runs in the user session (the service acts as a watchdog and tries to restart the agent if it stops).
 
+## Lock warning and the Finnish voice
+
+When an admin locks a device, they can set a warning time in seconds (`warning_seconds`, default 60 in the admin UI). If it is greater than zero, the agent first runs a warning countdown before the screen locks:
+
+- The screen stays fully usable for the whole countdown, so a running game can be played to the end of the warning. The played time is still counted as usage.
+- A click-through countdown banner floats on top (it does not steal focus or input) showing the time remaining and the admin's lock message.
+- The agent speaks the remaining time in Finnish, repeating every minute while more than a minute remains and every 10 seconds during the final minute ("2 minuuttia jäljellä ennen lukitusta", "50 sekuntia jäljellä ennen lukitusta").
+- When the countdown ends, the normal full-screen lock overlay takes over. Unlocking during the countdown cancels both the banner and the speech.
+
+The spoken warning is the primary signal because it is audible even over an exclusive-fullscreen game, where an external overlay cannot draw. A true exclusive-fullscreen DirectX game will not show the banner, but the voice still carries.
+
+`install.ps1` installs the Finnish (fi-FI) speech voice automatically. Skip it with `-SkipFinnishVoice`, or install/verify it on its own:
+
+```powershell
+.\scripts\install-heidi-voice.ps1
+```
+
+On Windows 11 / Server 2022+ this uses `Install-Language fi-FI`. On Windows 10 it prints the manual steps (Settings -> Time & language -> Language & region -> add Finnish -> Language options -> Speech -> Download). Without a Finnish voice the warning is still spoken, but with the default (English) voice, which mispronounces the Finnish text. A sign-out or reboot may be needed before the new voice is available to all processes.
+
 ## Test run with the PowerShell script
 
 The `scripts\test-run.ps1` script runs a lightweight test session with a single command, without an actual installation (no service, no registrations). It copies the binaries into a local temp directory, sets hard-coded environment variables, and starts the service, which starts the agent via its watchdog. The server address and credentials are hard-coded inside the script.

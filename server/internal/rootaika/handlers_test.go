@@ -95,7 +95,7 @@ func TestAdminLockReflectsInClientConfig(t *testing.T) {
 	}
 
 	lock := httptest.NewRequest(http.MethodPost, "/admin/devices/"+strconvInt(device.ID)+"/lock",
-		strings.NewReader("message=Aika+lopettaa"))
+		strings.NewReader("message=Aika+lopettaa&warning_seconds=45"))
 	lock.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	lock.SetBasicAuth("admin", "admin")
 	lockRecorder := httptest.NewRecorder()
@@ -104,8 +104,8 @@ func TestAdminLockReflectsInClientConfig(t *testing.T) {
 		t.Fatalf("lock status = %d", lockRecorder.Code)
 	}
 
-	if locked, message := clientConfigLock(t, app); !locked || message != "Aika lopettaa" {
-		t.Fatalf("after lock: locked=%v message=%q", locked, message)
+	if locked, message, warning := clientConfigLock(t, app); !locked || message != "Aika lopettaa" || warning != 45 {
+		t.Fatalf("after lock: locked=%v message=%q warning=%d", locked, message, warning)
 	}
 
 	unlock := httptest.NewRequest(http.MethodPost, "/admin/devices/"+strconvInt(device.ID)+"/unlock", nil)
@@ -116,12 +116,12 @@ func TestAdminLockReflectsInClientConfig(t *testing.T) {
 		t.Fatalf("unlock status = %d", unlockRecorder.Code)
 	}
 
-	if locked, message := clientConfigLock(t, app); locked || message != "" {
-		t.Fatalf("after unlock: locked=%v message=%q", locked, message)
+	if locked, message, warning := clientConfigLock(t, app); locked || message != "" || warning != 0 {
+		t.Fatalf("after unlock: locked=%v message=%q warning=%d", locked, message, warning)
 	}
 }
 
-func clientConfigLock(t *testing.T, app *App) (bool, string) {
+func clientConfigLock(t *testing.T, app *App) (bool, string, int) {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/client/config?client_id=client-1", nil)
 	request.SetBasicAuth("client", "client")
@@ -131,13 +131,14 @@ func clientConfigLock(t *testing.T, app *App) (bool, string) {
 		t.Fatalf("config status = %d body=%s", recorder.Code, recorder.Body.String())
 	}
 	var response struct {
-		Locked      bool   `json:"locked"`
-		LockMessage string `json:"lock_message"`
+		Locked         bool   `json:"locked"`
+		LockMessage    string `json:"lock_message"`
+		WarningSeconds int    `json:"warning_seconds"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode config: %v", err)
 	}
-	return response.Locked, response.LockMessage
+	return response.Locked, response.LockMessage, response.WarningSeconds
 }
 
 func strconvInt(value int64) string {
