@@ -18,9 +18,10 @@ import (
 )
 
 type stateStore struct {
-	mu      sync.RWMutex
-	path    string
-	current config.Config
+	mu           sync.RWMutex
+	path         string
+	current      config.Config
+	lastReported string
 }
 
 func Run(ctx context.Context, cfgPath string) error {
@@ -100,6 +101,11 @@ func startAgentHTTP(ctx context.Context, store *stateStore, eventBuffer *buffer.
 			}
 			queued++
 		}
+		// Remember the most recent state the agent observed so the poll loop can
+		// report it back to the server as the device's current status.
+		if queued > 0 {
+			store.setReported(string(req.Events[len(req.Events)-1].State))
+		}
 		writeJSON(w, http.StatusAccepted, map[string]int{"queued": queued})
 	})
 
@@ -172,7 +178,7 @@ func pollOnce(ctx context.Context, store *stateStore) error {
 	cfg := store.snapshot()
 	client := api.New(cfg.ServerURL, cfg.ClientUsername, cfg.ClientPassword)
 
-	serverConfig, err := client.FetchConfig(ctx, cfg.ClientID)
+	serverConfig, err := client.FetchConfig(ctx, cfg.ClientID, store.reported())
 	if err != nil {
 		return err
 	}
@@ -206,6 +212,18 @@ func (s *stateStore) snapshot() config.Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.current
+}
+
+func (s *stateStore) setReported(state string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastReported = state
+}
+
+func (s *stateStore) reported() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastReported
 }
 
 func (s *stateStore) update(fn func(*config.Config) bool) error {

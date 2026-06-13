@@ -190,6 +190,9 @@ func TestStartAgentHTTPEndpoints(t *testing.T) {
 		if count != 1 {
 			t.Fatalf("expected 1 queued event, got %d", count)
 		}
+		if got := store.reported(); got != "active" {
+			t.Fatalf("reported state = %q, want active", got)
+		}
 	})
 
 	t.Run("events empty rejected", func(t *testing.T) {

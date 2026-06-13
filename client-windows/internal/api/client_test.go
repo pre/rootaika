@@ -41,6 +41,9 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 			if r.URL.Query().Get("client_id") != "client-1" {
 				t.Fatalf("missing client_id query")
 			}
+			if r.URL.Query().Get("status") != "locked" {
+				t.Fatalf("missing status query, got %q", r.URL.Query().Get("status"))
+			}
 			return testResponse(http.StatusOK, `{"idle_threshold_seconds":30,"upload_interval_seconds":15,"poll_interval_seconds":5,"locked":true,"lock_message":"Aika lopettaa"}`), nil
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -64,7 +67,7 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 		t.Fatalf("PostEvents: %v", err)
 	}
 
-	cfg, err := client.FetchConfig(ctx, "client-1")
+	cfg, err := client.FetchConfig(ctx, "client-1", "locked")
 	if err != nil {
 		t.Fatalf("FetchConfig: %v", err)
 	}
@@ -92,7 +95,7 @@ func TestRetriesOnServerErrorThenSucceeds(t *testing.T) {
 		return testResponse(http.StatusOK, `{"commands":[]}`), nil
 	}))
 
-	if _, err := client.FetchConfig(context.Background(), "client-1"); err != nil {
+	if _, err := client.FetchConfig(context.Background(), "client-1", ""); err != nil {
 		t.Fatalf("FetchConfig: %v", err)
 	}
 	if calls != 3 {
@@ -124,7 +127,7 @@ func TestRetriesOnTransportErrorAndGivesUp(t *testing.T) {
 	client.WithRetry(3, time.Millisecond, time.Millisecond)
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
-	if _, err := client.FetchConfig(context.Background(), "client-1"); err == nil {
+	if _, err := client.FetchConfig(context.Background(), "client-1", ""); err == nil {
 		t.Fatalf("expected error after exhausting retries")
 	}
 	if calls != 3 {
@@ -141,7 +144,7 @@ func TestStopsRetryingWhenContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := client.FetchConfig(ctx, "client-1"); err == nil {
+	if _, err := client.FetchConfig(ctx, "client-1", ""); err == nil {
 		t.Fatalf("expected error on cancelled context")
 	}
 	if calls != 1 {

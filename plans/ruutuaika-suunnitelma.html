@@ -281,6 +281,12 @@
             <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>
+            <td>Clientin tilan raportointi ja lukituskuittaus</td>
+            <td>Config-pollissa palvelin kertoi clientille toivotun tilan, mutta client ei kertonut omaa tilaansa. Admin-UI näytti "lukittu" heti kun lukitus pyydettiin.</td>
+            <td>Client raportoi oman tilansa (<code>active</code>/<code>idle</code>/<code>locked</code>) samassa config-poll-pyynnössä <code>status</code>-query-parametrina; service muistaa agentin viimeksi havaitun tilan. Palvelin tallentaa sen <code>devices</code>-tauluun (<code>last_status</code>, <code>last_status_at_utc</code>). Admin-UI näyttää lukituspyynnön jälkeen "lukitaan (N s varoitus)" kunnes client kuittaa <code>locked</code>-tilan, jonka jälkeen näkyy "lukittu".</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
             <td>Service ja agentti -kommunikaatio</td>
             <td>Service välittää lukitustilan ja agentti välittää eventit servicelle (mekanismia ei nimetty).</td>
             <td>Loopback-HTTP (<code>127.0.0.1</code>) token-autentikoinnilla, ei nimettyä putkea (IPC). Tämä on tarkennus, ei ristiriita.</td>

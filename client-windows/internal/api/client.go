@@ -70,8 +70,11 @@ func (c *Client) PostEvents(ctx context.Context, batch model.EventBatch) error {
 	return err
 }
 
-func (c *Client) FetchConfig(ctx context.Context, clientID string) (model.ClientConfig, error) {
+func (c *Client) FetchConfig(ctx context.Context, clientID, status string) (model.ClientConfig, error) {
 	q := url.Values{"client_id": []string{clientID}}
+	if status != "" {
+		q.Set("status", status)
+	}
 	body, err := c.doJSON(ctx, http.MethodGet, "/api/v1/client/config", q, nil)
 	if err != nil {
 		return model.ClientConfig{}, err

@@ -121,6 +121,46 @@ func TestAdminLockReflectsInClientConfig(t *testing.T) {
 	}
 }
 
+func TestLockShowsPendingUntilClientAcks(t *testing.T) {
+	app := testApp(t)
+	ctx := context.Background()
+	device, err := app.store.EnsureDevice(ctx, "client-1", app.now())
+	if err != nil {
+		t.Fatalf("ensure device: %v", err)
+	}
+
+	if err := app.store.SetDeviceLock(ctx, device.ID, true, "Aika lopettaa", 45, app.now()); err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+
+	// Before the client acks, the admin UI must show the device as pending, not
+	// locked, including the configured warning delay.
+	devices, err := app.store.Devices(ctx)
+	if err != nil {
+		t.Fatalf("devices: %v", err)
+	}
+	if got := lockState(devices[0]); got != "lukitaan (45 s varoitus)" {
+		t.Fatalf("before ack lockState = %q, want pending", got)
+	}
+
+	// The client polls config and reports it is now locked.
+	poll := httptest.NewRequest(http.MethodGet, "/api/v1/client/config?client_id=client-1&status=locked", nil)
+	poll.SetBasicAuth("client", "client")
+	pollRecorder := httptest.NewRecorder()
+	app.ServeHTTP(pollRecorder, poll)
+	if pollRecorder.Code != http.StatusOK {
+		t.Fatalf("poll status = %d body=%s", pollRecorder.Code, pollRecorder.Body.String())
+	}
+
+	devices, err = app.store.Devices(ctx)
+	if err != nil {
+		t.Fatalf("devices: %v", err)
+	}
+	if got := lockState(devices[0]); got != "lukittu" {
+		t.Fatalf("after ack lockState = %q, want lukittu", got)
+	}
+}
+
 func clientConfigLock(t *testing.T, app *App) (bool, string, int) {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/client/config?client_id=client-1", nil)

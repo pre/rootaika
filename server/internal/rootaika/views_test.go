@@ -32,11 +32,21 @@ func TestHumanSeconds(t *testing.T) {
 }
 
 func TestLockState(t *testing.T) {
-	if got := lockState(true); got != "lukittu" {
-		t.Fatalf("lockState(true) = %q want %q", got, "lukittu")
+	cases := []struct {
+		name   string
+		device Device
+		want   string
+	}{
+		{"unlocked", Device{Locked: false}, "avattu"},
+		{"acked locked", Device{Locked: true, LastStatus: StateLocked}, "lukittu"},
+		{"pending with warning", Device{Locked: true, WarningSeconds: 45}, "lukitaan (45 s varoitus)"},
+		{"pending no warning", Device{Locked: true}, "lukitaan…"},
+		{"pending while still active", Device{Locked: true, LastStatus: StateActive, WarningSeconds: 30}, "lukitaan (30 s varoitus)"},
 	}
-	if got := lockState(false); got != "avattu" {
-		t.Fatalf("lockState(false) = %q want %q", got, "avattu")
+	for _, tc := range cases {
+		if got := lockState(tc.device); got != tc.want {
+			t.Fatalf("%s: lockState = %q want %q", tc.name, got, tc.want)
+		}
 	}
 }
 

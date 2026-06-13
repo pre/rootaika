@@ -37,6 +37,9 @@ type Device struct {
 	CreatedAt          time.Time
 	LastSeenAt         time.Time
 	Locked             bool
+	WarningSeconds     int
+	LastStatus         string
+	LastStatusAt       time.Time
 }
 
 type ActivityEvent struct {

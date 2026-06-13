@@ -320,6 +320,41 @@ func TestDevicesReportLockState(t *testing.T) {
 	}
 }
 
+func TestRecordDeviceStatus(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+
+	if err := store.RecordDeviceStatus(ctx, device.ID, StateLocked, fixedNow()); err != nil {
+		t.Fatalf("record status: %v", err)
+	}
+	devices, err := store.Devices(ctx)
+	if err != nil {
+		t.Fatalf("devices: %v", err)
+	}
+	if len(devices) != 1 || devices[0].LastStatus != StateLocked {
+		t.Fatalf("devices = %+v, want last_status=locked", devices)
+	}
+	if devices[0].LastStatusAt.IsZero() {
+		t.Fatalf("last_status_at not set")
+	}
+}
+
+func TestRecordDeviceStatusRejectsInvalid(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if err := store.RecordDeviceStatus(ctx, device.ID, "bogus", fixedNow()); err == nil {
+		t.Fatalf("expected error for invalid status")
+	}
+}
+
 func TestUsersCreateAndDedup(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()

@@ -66,7 +66,9 @@ CREATE TABLE IF NOT EXISTS devices (
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   registration_status TEXT NOT NULL DEFAULT 'unassigned',
   created_at_utc TEXT NOT NULL,
-  last_seen_at_utc TEXT NOT NULL
+  last_seen_at_utc TEXT NOT NULL,
+  last_status TEXT NOT NULL DEFAULT '',
+  last_status_at_utc TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -123,7 +125,13 @@ CREATE TABLE IF NOT EXISTS auth_credentials (
 	if err := s.ensureColumn(ctx, "device_config", "lock_message", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.ensureColumn(ctx, "device_config", "warning_seconds", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.ensureColumn(ctx, "device_config", "warning_seconds", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "devices", "last_status", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.ensureColumn(ctx, "devices", "last_status_at_utc", "TEXT NOT NULL DEFAULT ''")
 }
 
 // ensureColumn adds a column to an existing table when it is missing, so older
@@ -376,11 +384,26 @@ UPDATE device_config SET locked = ?, lock_message = ?, warning_seconds = ? WHERE
 	return nil
 }
 
+// RecordDeviceStatus stores the state the client reported about itself during a
+// config poll (active/idle/locked). The admin UI uses this as the lock
+// acknowledgement: a device shows "lukittu" only once it reports locked, not
+// when the admin merely requested the lock.
+func (s *Store) RecordDeviceStatus(ctx context.Context, deviceID int64, status string, now time.Time) error {
+	if !validState(status) {
+		return fmt.Errorf("invalid status %q", status)
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE devices SET last_status = ?, last_status_at_utc = ? WHERE id = ?`,
+		status, formatDBTime(now), deviceID)
+	return err
+}
+
 func (s *Store) Devices(ctx context.Context) ([]Device, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT d.id, d.client_uuid, d.display_name, d.user_id, COALESCE(u.name, ''),
        d.registration_status, d.created_at_utc, d.last_seen_at_utc,
-       COALESCE(c.locked, 0)
+       d.last_status, d.last_status_at_utc,
+       COALESCE(c.locked, 0), COALESCE(c.warning_seconds, 0)
 FROM devices d
 LEFT JOIN users u ON u.id = d.user_id
 LEFT JOIN device_config c ON c.device_id = d.id
@@ -394,9 +417,10 @@ ORDER BY d.display_name COLLATE NOCASE, d.id`)
 	for rows.Next() {
 		var device Device
 		var userID sql.NullInt64
-		var created, lastSeen string
+		var created, lastSeen, lastStatusAt string
 		if err := rows.Scan(&device.ID, &device.ClientUUID, &device.DisplayName, &userID, &device.UserName,
-			&device.RegistrationStatus, &created, &lastSeen, &device.Locked); err != nil {
+			&device.RegistrationStatus, &created, &lastSeen, &device.LastStatus, &lastStatusAt,
+			&device.Locked, &device.WarningSeconds); err != nil {
 			return nil, err
 		}
 		if userID.Valid {
@@ -404,6 +428,9 @@ ORDER BY d.display_name COLLATE NOCASE, d.id`)
 		}
 		device.CreatedAt = parseDBTime(created)
 		device.LastSeenAt = parseDBTime(lastSeen)
+		if lastStatusAt != "" {
+			device.LastStatusAt = parseDBTime(lastStatusAt)
+		}
 		devices = append(devices, device)
 	}
 	return devices, rows.Err()

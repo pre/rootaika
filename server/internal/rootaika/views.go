@@ -85,7 +85,7 @@ func (a *App) dashboardData(r *http.Request, role Role) (dashboardData, error) {
 			Device:       device,
 			TotalSeconds: report.TotalSeconds,
 			Processes:    processViews(report.ByProcess),
-			LockState:    lockState(device.Locked),
+			LockState:    lockState(device),
 		}
 		deviceViews = append(deviceViews, view)
 	}
@@ -116,11 +116,22 @@ func processViews(byProcess map[string]int64) []processView {
 	return processes
 }
 
-func lockState(locked bool) string {
-	if locked {
+// lockState describes the lock status shown in the admin UI. When the admin
+// requests a lock, the device is not "lukittu" yet: it becomes locked only once
+// the client reports state=locked back during a config poll. Until then it shows
+// as pending, including the configured warning delay, so the admin sees the
+// device is on its way to locking rather than already locked.
+func lockState(device Device) string {
+	if !device.Locked {
+		return "avattu"
+	}
+	if device.LastStatus == StateLocked {
 		return "lukittu"
 	}
-	return "avattu"
+	if device.WarningSeconds > 0 {
+		return "lukitaan (" + strconv.Itoa(device.WarningSeconds) + " s varoitus)"
+	}
+	return "lukitaan…"
 }
 
 func humanSeconds(seconds int64) string {

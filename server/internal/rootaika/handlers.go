@@ -130,6 +130,14 @@ func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// The client reports its own current state in the same poll request. An
+	// invalid or absent status is ignored so the poll never fails over it.
+	if status := strings.TrimSpace(r.URL.Query().Get("status")); validState(status) {
+		if err := a.store.RecordDeviceStatus(r.Context(), config.DeviceID, status, a.now()); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "record status failed")
+			return
+		}
+	}
 	categories := make([]map[string]string, 0, len(config.Categories))
 	for _, category := range config.Categories {
 		categories = append(categories, map[string]string{
