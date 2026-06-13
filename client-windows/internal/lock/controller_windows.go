@@ -173,11 +173,14 @@ $form.FormBorderStyle = 'None'
 $form.StartPosition = 'Manual'
 $form.ShowInTaskbar = $false
 $form.TopMost = $true
-$form.BackColor = [System.Drawing.Color]::Black
-$form.TransparencyKey = [System.Drawing.Color]::Black
+# Whole-window translucency so the game behind stays visible. Opacity 0.35 =
+# 35% opaque / 65% see-through. A short bar covers as little of the game as
+# possible while staying readable.
+$form.Opacity = 0.35
+$form.BackColor = [System.Drawing.Color]::FromArgb(138, 90, 0)
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $form.Width = $screen.Width
-$form.Height = 160
+$form.Height = 90
 $form.Left = 0
 $form.Top = 40
 $label = New-Object System.Windows.Forms.Label
@@ -185,8 +188,8 @@ $label.AutoSize = $false
 $label.Dock = 'Fill'
 $label.TextAlign = 'MiddleCenter'
 $label.ForeColor = [System.Drawing.Color]::White
-$label.BackColor = [System.Drawing.Color]::FromArgb(200, 138, 90, 0)
-$label.Font = New-Object System.Drawing.Font('Segoe UI', 28, [System.Drawing.FontStyle]::Bold)
+$label.BackColor = [System.Drawing.Color]::Transparent
+$label.Font = New-Object System.Drawing.Font('Segoe UI', 22, [System.Drawing.FontStyle]::Bold)
 $nl = [Environment]::NewLine
 $label.Text = (Format-Remaining $script:remaining) + $nl + $message
 $form.Controls.Add($label)
