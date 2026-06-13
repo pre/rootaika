@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const EventTypeActivityObserved = "activity_observed"
 
@@ -53,7 +56,7 @@ const (
 
 type Command struct {
 	CommandID string      `json:"command_id,omitempty"`
-	ID        string      `json:"id,omitempty"`
+	ID        json.Number `json:"id,omitempty"`
 	Type      CommandType `json:"type"`
 }
 
@@ -61,7 +64,7 @@ func (c Command) Identifier() string {
 	if c.CommandID != "" {
 		return c.CommandID
 	}
-	return c.ID
+	return c.ID.String()
 }
 
 type CommandsResponse struct {

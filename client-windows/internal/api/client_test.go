@@ -187,6 +187,20 @@ func TestBackoffDoublesAndCaps(t *testing.T) {
 	}
 }
 
+func TestFetchCommandsDecodesNumericServerID(t *testing.T) {
+	client := testClientNoSleep(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return testResponse(http.StatusOK, `{"commands":[{"id":42,"type":"lock","created_at":"2026-06-13T12:00:00Z"}]}`), nil
+	}))
+
+	commands, err := client.FetchCommands(context.Background(), "client-1")
+	if err != nil {
+		t.Fatalf("FetchCommands: %v", err)
+	}
+	if len(commands) != 1 || commands[0].Identifier() != "42" || commands[0].Type != model.CommandLock {
+		t.Fatalf("unexpected commands: %+v", commands)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
