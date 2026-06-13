@@ -164,9 +164,23 @@ func (a *App) usageChart(ctx context.Context, r ChartRange) (UsageChart, error) 
 		series = append(series, DeviceSeries{DeviceID: device.ID, Name: device.DisplayName, Points: points})
 	}
 
+	labels := spanLabels(spans)
+	if r != RangeDay {
+		sets := make([][]float64, len(series))
+		for i := range series {
+			sets[i] = series[i].Points
+		}
+		if start := firstNonEmptyIndex(labels, sets); start > 0 {
+			labels = labels[start:]
+			for i := range series {
+				series[i].Points = series[i].Points[start:]
+			}
+		}
+	}
+
 	return UsageChart{
 		Range:       string(r),
-		Labels:      spanLabels(spans),
+		Labels:      labels,
 		YMaxMinutes: settings.ChartYMaxMinutes,
 		Now:         now.In(a.location).Format("2006-01-02 15:04:05"),
 		Devices:     series,
@@ -217,15 +231,44 @@ func (a *App) programChart(ctx context.Context, deviceID int64, r ChartRange) (P
 		}
 	}
 
+	labels := spanLabels(spans)
+	if r != RangeDay {
+		sets := make([][]float64, len(series))
+		for i := range series {
+			sets[i] = series[i].Points
+		}
+		if start := firstNonEmptyIndex(labels, sets); start > 0 {
+			labels = labels[start:]
+			for i := range series {
+				series[i].Points = series[i].Points[start:]
+			}
+		}
+	}
+
 	return ProgramChart{
 		Range:       string(r),
 		DeviceID:    deviceID,
-		Labels:      spanLabels(spans),
+		Labels:      labels,
 		YMaxMinutes: settings.ChartYMaxMinutes,
 		Now:         now.In(a.location).Format("2006-01-02 15:04:05"),
 		Series:      series,
 		Totals:      totals,
 	}, nil
+}
+
+// firstNonEmptyIndex returns the index of the first column where any series has
+// data, so leading empty days can be dropped from the left of a chart. Trailing
+// empty days (future) are kept. Returns 0 when there is no data at all (or only
+// one column), so the chart is never reduced to nothing.
+func firstNonEmptyIndex(labels []string, sets [][]float64) int {
+	for col := range labels {
+		for _, points := range sets {
+			if col < len(points) && points[col] > 0 {
+				return col
+			}
+		}
+	}
+	return 0
 }
 
 func spanLabels(spans []chartSpan) []string {

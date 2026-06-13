@@ -1,5 +1,17 @@
 package rootaika
 
+// chartNav is the shared top navigation, identical on every page. Links are
+// absolute (with /#anchor for dashboard sections) so they work from any view.
+const chartNav = `<nav class="inline">
+        <a href="/">Tänään</a>
+        <a href="/week">Viikko</a>
+        <a href="/month">Kuukausi</a>
+        <a href="/board">Taulu</a>
+        <a href="/#devices">Laitteet</a>
+        <a href="/#users">Käyttäjät</a>
+        <a href="/#settings">Asetukset</a>
+      </nav>`
+
 // chartBaseCSS is the shared stylesheet for the chart views. It mirrors the
 // palette used by the dashboard so the chart pages feel part of the same app.
 const chartBaseCSS = `

@@ -72,12 +72,7 @@ var rangeTemplate = template.Must(template.New("range").Parse(`<!doctype html>
         <h1>{{.Title}}</h1>
         <p class="muted">{{.Subtitle}} Rooli {{.Role}}.</p>
       </div>
-      <nav class="inline">
-        <a href="/">Tänään</a>
-        <a href="/week">Viikko</a>
-        <a href="/month">Kuukausi</a>
-        <a href="/board">Taulu</a>
-      </nav>
+      ` + chartNav + `
     </header>
 
     <section class="card">

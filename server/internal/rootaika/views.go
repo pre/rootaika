@@ -223,15 +223,7 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
         <h1>Ruutuaika</h1>
         <p class="muted">Tänään {{.TodayLabel}}, rooli {{.Role}}. Päivitetty {{formatTime .Now}}.</p>
       </div>
-      <nav class="inline">
-        <a href="#today">Tänään</a>
-        <a href="/week">Viikko</a>
-        <a href="/month">Kuukausi</a>
-        <a href="/board">Taulu</a>
-        <a href="#devices">Laitteet</a>
-        <a href="#users">Käyttäjät</a>
-        <a href="#settings">Asetukset</a>
-      </nav>
+      ` + chartNav + `
     </header>
 
     {{if .ReadOnly}}<div class="notice">Client-tunnuksella näkymä on read-only. Muutokset vaativat admin-tunnuksen.</div>{{end}}

@@ -58,11 +58,7 @@ var boardTemplate = template.Must(template.New("board").Parse(`<!doctype html>
         <h1>Päivän ruutuaika</h1>
         <p class="muted updated">Päivittyy {{.PollSeconds}} s välein. Päivitetty <span id="updated">-</span>.</p>
       </div>
-      <nav class="inline">
-        <a href="/">Tänään</a>
-        <a href="/week">Viikko</a>
-        <a href="/month">Kuukausi</a>
-      </nav>
+      ` + chartNav + `
     </header>
 
     <section class="card">

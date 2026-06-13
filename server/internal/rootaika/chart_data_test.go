@@ -201,6 +201,76 @@ func TestProgramChartTotalsAndSeries(t *testing.T) {
 	}
 }
 
+func TestFirstNonEmptyIndex(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		sets   [][]float64
+		want   int
+	}{
+		{
+			name:   "leading empties trimmed to first data column",
+			labels: []string{"a", "b", "c", "d"},
+			sets:   [][]float64{{0, 0, 5, 0}, {0, 0, 0, 3}},
+			want:   2,
+		},
+		{
+			name:   "data in first column keeps everything",
+			labels: []string{"a", "b"},
+			sets:   [][]float64{{1, 0}},
+			want:   0,
+		},
+		{
+			name:   "no data anywhere keeps everything",
+			labels: []string{"a", "b", "c"},
+			sets:   [][]float64{{0, 0, 0}},
+			want:   0,
+		},
+		{
+			name:   "no series keeps everything",
+			labels: []string{"a", "b"},
+			sets:   nil,
+			want:   0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := firstNonEmptyIndex(tt.labels, tt.sets); got != tt.want {
+				t.Fatalf("firstNonEmptyIndex = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUsageChartTrimsLeadingEmptyDays(t *testing.T) {
+	app := testApp(t) // now = 2026-06-11 12:00 UTC
+	ctx := context.Background()
+	device, err := app.store.EnsureDevice(ctx, "client-1", app.now())
+	if err != nil {
+		t.Fatalf("ensure device: %v", err)
+	}
+	// Only data today (the last day of the week range).
+	events := []EventInput{
+		{EventUUID: "a", Type: EventTypeActivityObserved, State: StateActive, ProcessName: "game.exe", OccurredAt: time.Date(2026, 6, 11, 9, 0, 0, 0, time.UTC), Sequence: 1},
+		{EventUUID: "b", Type: EventTypeActivityObserved, State: StateIdle, OccurredAt: time.Date(2026, 6, 11, 9, 10, 0, 0, time.UTC), Sequence: 2},
+	}
+	if _, _, err := app.store.InsertEvents(ctx, device.ID, events, app.now()); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+
+	chart, err := app.usageChart(ctx, RangeWeek)
+	if err != nil {
+		t.Fatalf("usageChart: %v", err)
+	}
+	// The 7-day week should be trimmed to start at the only day with data.
+	if len(chart.Labels) != 1 {
+		t.Fatalf("week labels = %d (%v), want 1 after trimming", len(chart.Labels), chart.Labels)
+	}
+	if len(chart.Devices[0].Points) != len(chart.Labels) {
+		t.Fatalf("points/labels mismatch after trim")
+	}
+}
+
 func TestUsageChartRangesProduceDailyBuckets(t *testing.T) {
 	app := testApp(t)
 	ctx := context.Background()
