@@ -89,6 +89,7 @@ type Command struct {
 	Device    string
 	Type      string
 	Status    string
+	Message   string
 	CreatedAt time.Time
 	AckAt     *time.Time
 }

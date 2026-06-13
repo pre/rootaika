@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS commands (
   device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  message TEXT NOT NULL DEFAULT '',
   created_at_utc TEXT NOT NULL,
   ack_at_utc TEXT
 );
@@ -121,6 +122,40 @@ CREATE TABLE IF NOT EXISTS auth_credentials (
   updated_at_utc TEXT NOT NULL
 );
 `)
+	if err != nil {
+		return err
+	}
+	return s.ensureColumn(ctx, "commands", "message", "TEXT NOT NULL DEFAULT ''")
+}
+
+// ensureColumn adds a column to an existing table when it is missing, so older
+// databases pick up schema additions that CREATE TABLE IF NOT EXISTS skips.
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			ctype      string
+			notNull    int
+			dflt       sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &primaryKey); err != nil {
+			return err
+		}
+		if name == column {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+column+" "+definition)
 	return err
 }
 
@@ -328,7 +363,7 @@ func (s *Store) PendingCommands(ctx context.Context, clientUUID string, now time
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, device_id, type, status, created_at_utc, ack_at_utc
+SELECT id, device_id, type, status, message, created_at_utc, ack_at_utc
 FROM commands
 WHERE device_id = ? AND status = 'pending'
 ORDER BY created_at_utc ASC, id ASC`, device.ID)
@@ -378,7 +413,7 @@ func (s *Store) AckCommand(ctx context.Context, commandID int64, clientUUID stri
 	return count > 0, nil
 }
 
-func (s *Store) CreateCommand(ctx context.Context, deviceID int64, commandType string, now time.Time) (int64, error) {
+func (s *Store) CreateCommand(ctx context.Context, deviceID int64, commandType, message string, now time.Time) (int64, error) {
 	if !validCommand(commandType) {
 		return 0, fmt.Errorf("invalid command type %q", commandType)
 	}
@@ -395,8 +430,8 @@ func (s *Store) CreateCommand(ctx context.Context, deviceID int64, commandType s
 		return 0, err
 	}
 	result, err := tx.ExecContext(ctx, `
-INSERT INTO commands(device_id, type, status, created_at_utc)
-VALUES (?, ?, 'pending', ?)`, deviceID, commandType, formatDBTime(now))
+INSERT INTO commands(device_id, type, status, message, created_at_utc)
+VALUES (?, ?, 'pending', ?, ?)`, deviceID, commandType, message, formatDBTime(now))
 	if err != nil {
 		return 0, err
 	}
@@ -592,7 +627,7 @@ func (s *Store) RecentCommands(ctx context.Context, limit int) ([]Command, error
 	rows, err := s.db.QueryContext(ctx, `
 SELECT c.id, c.device_id,
        COALESCE(NULLIF(d.display_name, ''), d.client_uuid) AS device,
-       c.type, c.status, c.created_at_utc, c.ack_at_utc
+       c.type, c.status, c.message, c.created_at_utc, c.ack_at_utc
 FROM commands c
 JOIN devices d ON d.id = c.device_id
 ORDER BY c.created_at_utc DESC, c.id DESC
@@ -681,12 +716,12 @@ func scanCommands(rows *sql.Rows) ([]Command, error) {
 		var created string
 		var ack sql.NullString
 		switch len(columns) {
-		case 6:
-			if err := rows.Scan(&command.ID, &command.DeviceID, &command.Type, &command.Status, &created, &ack); err != nil {
+		case 7:
+			if err := rows.Scan(&command.ID, &command.DeviceID, &command.Type, &command.Status, &command.Message, &created, &ack); err != nil {
 				return nil, err
 			}
-		case 7:
-			if err := rows.Scan(&command.ID, &command.DeviceID, &command.Device, &command.Type, &command.Status, &created, &ack); err != nil {
+		case 8:
+			if err := rows.Scan(&command.ID, &command.DeviceID, &command.Device, &command.Type, &command.Status, &command.Message, &created, &ack); err != nil {
 				return nil, err
 			}
 		default:

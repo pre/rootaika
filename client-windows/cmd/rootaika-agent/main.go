@@ -56,6 +56,7 @@ func run(ctx context.Context, cfgPath string) error {
 	local := localClient{httpClient: httpClient, address: cfg.AgentListenAddress, token: cfg.AgentToken}
 	state := serviceState{
 		Locked:                 cfg.Locked,
+		LockMessage:            cfg.LockMessage,
 		IdleThresholdSeconds:   cfg.IdleThresholdSeconds,
 		ObserveIntervalSeconds: cfg.ObserveIntervalSeconds,
 		DebugMode:              cfg.DebugMode,
@@ -77,7 +78,7 @@ func run(ctx context.Context, cfgPath string) error {
 		if err := console.SetVisible(state.DebugMode); err != nil {
 			log.Printf("set console visibility failed: %v", err)
 		}
-		if err := locker.SetLocked(ctx, state.Locked); err != nil {
+		if err := locker.SetLocked(ctx, state.Locked, state.LockMessage); err != nil {
 			log.Printf("set locked state failed: %v", err)
 		}
 
@@ -229,10 +230,11 @@ func (c localClient) endpoint(endpointPath string) string {
 }
 
 type serviceState struct {
-	Locked                 bool `json:"locked"`
-	IdleThresholdSeconds   int  `json:"idle_threshold_seconds"`
-	ObserveIntervalSeconds int  `json:"observe_interval_seconds"`
-	DebugMode              bool `json:"debug_mode"`
+	Locked                 bool   `json:"locked"`
+	LockMessage            string `json:"lock_message"`
+	IdleThresholdSeconds   int    `json:"idle_threshold_seconds"`
+	ObserveIntervalSeconds int    `json:"observe_interval_seconds"`
+	DebugMode              bool   `json:"debug_mode"`
 }
 
 type agentEventsRequest struct {

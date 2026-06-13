@@ -58,6 +58,32 @@ func TestHandleCommandLockUnlock(t *testing.T) {
 	}
 }
 
+func TestHandleCommandLockStoresMessage(t *testing.T) {
+	store := newStore(t, config.Config{})
+
+	if err := handleCommand(store, model.Command{Type: model.CommandLock, Message: "Aika lopettaa"}); err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	if got := store.snapshot().LockMessage; got != "Aika lopettaa" {
+		t.Fatalf("LockMessage = %q", got)
+	}
+
+	// A new message while already locked re-applies the config.
+	if err := handleCommand(store, model.Command{Type: model.CommandLock, Message: "Nyt riittää"}); err != nil {
+		t.Fatalf("relock: %v", err)
+	}
+	if got := store.snapshot().LockMessage; got != "Nyt riittää" {
+		t.Fatalf("updated LockMessage = %q", got)
+	}
+
+	if err := handleCommand(store, model.Command{Type: model.CommandUnlock}); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	if got := store.snapshot().LockMessage; got != "" {
+		t.Fatalf("unlock did not clear LockMessage, got %q", got)
+	}
+}
+
 func TestHandleCommandUnknownType(t *testing.T) {
 	store := newStore(t, config.Config{})
 	if err := handleCommand(store, model.Command{Type: model.CommandType("frobnicate")}); err == nil {

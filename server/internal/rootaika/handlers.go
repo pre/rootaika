@@ -167,6 +167,7 @@ func (a *App) handleClientCommands(w http.ResponseWriter, r *http.Request) {
 		items = append(items, map[string]any{
 			"id":         command.ID,
 			"type":       command.Type,
+			"message":    command.Message,
 			"created_at": command.CreatedAt.Format(time.RFC3339),
 		})
 	}
@@ -250,7 +251,11 @@ func (a *App) adminDeviceCommand(w http.ResponseWriter, r *http.Request, rawDevi
 		http.Error(w, "invalid device id", http.StatusBadRequest)
 		return
 	}
-	if _, err := a.store.CreateCommand(r.Context(), deviceID, commandType, a.now()); err != nil {
+	message := ""
+	if commandType == CommandLock {
+		message = strings.TrimSpace(r.FormValue("message"))
+	}
+	if _, err := a.store.CreateCommand(r.Context(), deviceID, commandType, message, a.now()); err != nil {
 		http.Error(w, "create command failed", http.StatusInternalServerError)
 		return
 	}

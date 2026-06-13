@@ -40,6 +40,7 @@ type Config struct {
 	MaxCountableGapSeconds int    `json:"max_countable_gap_seconds"`
 	BatchSize              int    `json:"batch_size"`
 	Locked                 bool   `json:"locked"`
+	LockMessage            string `json:"lock_message,omitempty"`
 	DebugMode              bool   `json:"debug_mode"`
 }
 

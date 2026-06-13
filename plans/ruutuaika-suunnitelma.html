@@ -263,6 +263,12 @@
             <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>
+            <td>Lukitusruutu</td>
+            <td>Agentti näyttää lukitustilassa mustan fullscreen topmost -ikkunan.</td>
+            <td>Musta ruutu korvattu vihreällä, jossa lukee <code>rootaika</code> ja sen alla palvelimelta tuleva viesti. Admin kirjoittaa viestin lock-lomakkeeseen, ja se kulkee <code>commands.message</code>-sarakkeesta clientin configiin ja agentille. Viesti välitetään PowerShell-overlaylle ympäristömuuttujassa injektiosuojan vuoksi.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
             <td>Service ja agentti -kommunikaatio</td>
             <td>Service välittää lukitustilan ja agentti välittää eventit servicelle (mekanismia ei nimetty).</td>
             <td>Loopback-HTTP (<code>127.0.0.1</code>) token-autentikoinnilla, ei nimettyä putkea (IPC). Tämä on tarkennus, ei ristiriita.</td>
@@ -398,7 +404,7 @@
         <li>Lukee aktiivisen ikkunan <code>GetForegroundWindow</code>-kutsulla.</li>
         <li>Selvittää prosessin PID:n <code>GetWindowThreadProcessId</code>-kutsulla.</li>
         <li>Selvittää aktiivisen prosessin nimen PID:n perusteella.</li>
-        <li>Näyttää lukitustilassa mustan fullscreen topmost -ikkunan.</li>
+        <li>Näyttää lukitustilassa vihreän fullscreen topmost -ikkunan, jossa lukee <code>rootaika</code> ja palvelimelta tuleva viesti.</li>
         <li>Jos käyttäjä saa agenttiprosessin sammutettua, Windows Service havaitsee tilanteen ja käynnistää agentin uudelleen.</li>
       </ul>
     </section>
@@ -647,7 +653,7 @@
         <li>Admin luo web-UI:sta lock- tai unlock-komennon tietylle laitteelle.</li>
         <li>Client hakee komennon pollingilla.</li>
         <li>Windows Service välittää lukitustilan käyttäjäsession agentille loopback-HTTP:n (<code>127.0.0.1</code>) yli token-autentikoinnilla.</li>
-        <li>Agentti näyttää mustan fullscreen topmost -ikkunan.</li>
+        <li>Agentti näyttää vihreän fullscreen topmost -ikkunan, jossa lukee <code>rootaika</code> ja palvelimelta saatu viesti.</li>
         <li>Agentti palauttaa ikkunan etualalle, jos fokus vaihtuu.</li>
         <li>Lukitus puretaan vain palvelimelta tulevalla unlock-komennolla.</li>
       </ul>
@@ -667,7 +673,7 @@
         <li>Windowsin service recovery asetetaan käynnistämään service uudelleen, jos se kaatuu.</li>
         <li>Service tarkistaa säännöllisesti, että käyttäjäsession agentti on käynnissä oikeassa sessiossa.</li>
         <li>Jos agentti puuttuu tai se on sammutettu, service käynnistää sen uudelleen.</li>
-        <li>Jos laite on lukitussa tilassa, uudelleenkäynnistetty agentti avaa mustan topmost-overlayn heti uudelleen.</li>
+        <li>Jos laite on lukitussa tilassa, uudelleenkäynnistetty agentti avaa vihreän topmost-overlayn heti uudelleen.</li>
         <li>Clientin config, tunnukset ja paikallinen SQLite-puskuri suojataan ACL-oikeuksilla adminille ja service-käyttäjälle.</li>
       </ul>
       <p class="note">
@@ -697,11 +703,11 @@
         <li>Web-UI:n katselunäkymät: tänään, viikko, kuukausi ja ohjelmakohtainen erittely.</li>
         <li>Admin-UI: asetukset, käyttäjät, laitteet, kategoriat ja lock/unlock.</li>
         <li>Windows Service: UUID, config-cache, local SQLite queue, upload worker ja command polling.</li>
-        <li>User Session Agent: idle-tunnistus, foreground process -tunnistus, eventtien välitys servicelle loopback-HTTP:n yli ja musta overlay lukitustilassa.</li>
+        <li>User Session Agent: idle-tunnistus, foreground process -tunnistus, eventtien välitys servicelle loopback-HTTP:n yli ja vihreä viestillinen overlay lukitustilassa.</li>
         <li>Windows-asennus: manuaalisesti ajettava PowerShell-skripti, joka asentaa servicen ja suojaa configin ACL-oikeuksilla.</li>
         <li>Server-laskenta: eventeistä käyttöjaksot ja raportit.</li>
         <li>Watchdog: service valvoo session-agenttia ja käynnistää sen uudelleen, jos käyttäjä sammuttaa sen.</li>
-        <li>Lukitustoiminto: musta topmost fullscreen overlay ja unlock palvelimelta.</li>
+        <li>Lukitustoiminto: vihreä topmost fullscreen overlay viestillä ja unlock palvelimelta.</li>
         <li>Kovennukset: tiedosto-oikeudet, service recovery, retry/backoff, lokitus ja virhetilanteiden käsittely.</li>
       </ol>
     </section>

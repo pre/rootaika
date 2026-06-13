@@ -69,6 +69,7 @@ func startAgentHTTP(ctx context.Context, store *stateStore, eventBuffer *buffer.
 		cfg := store.snapshot()
 		writeJSON(w, http.StatusOK, agentStateResponse{
 			Locked:                 cfg.Locked,
+			LockMessage:            cfg.LockMessage,
 			IdleThresholdSeconds:   cfg.IdleThresholdSeconds,
 			ObserveIntervalSeconds: cfg.ObserveIntervalSeconds,
 			DebugMode:              cfg.DebugMode,
@@ -208,18 +209,20 @@ func handleCommand(store *stateStore, command model.Command) error {
 	switch strings.ToLower(string(command.Type)) {
 	case string(model.CommandLock):
 		return store.update(func(cfg *config.Config) bool {
-			if cfg.Locked {
+			if cfg.Locked && cfg.LockMessage == command.Message {
 				return false
 			}
 			cfg.Locked = true
+			cfg.LockMessage = command.Message
 			return true
 		})
 	case string(model.CommandUnlock):
 		return store.update(func(cfg *config.Config) bool {
-			if !cfg.Locked {
+			if !cfg.Locked && cfg.LockMessage == "" {
 				return false
 			}
 			cfg.Locked = false
+			cfg.LockMessage = ""
 			return true
 		})
 	default:
@@ -294,8 +297,9 @@ type agentEventsRequest struct {
 }
 
 type agentStateResponse struct {
-	Locked                 bool `json:"locked"`
-	IdleThresholdSeconds   int  `json:"idle_threshold_seconds"`
-	ObserveIntervalSeconds int  `json:"observe_interval_seconds"`
-	DebugMode              bool `json:"debug_mode"`
+	Locked                 bool   `json:"locked"`
+	LockMessage            string `json:"lock_message"`
+	IdleThresholdSeconds   int    `json:"idle_threshold_seconds"`
+	ObserveIntervalSeconds int    `json:"observe_interval_seconds"`
+	DebugMode              bool   `json:"debug_mode"`
 }

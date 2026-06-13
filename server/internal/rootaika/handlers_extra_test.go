@@ -193,7 +193,7 @@ func TestHandleCommandAckReadsClientIDFromBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure device: %v", err)
 	}
-	id, err := app.store.CreateCommand(ctx, device.ID, CommandLock, app.now())
+	id, err := app.store.CreateCommand(ctx, device.ID, CommandLock, "", app.now())
 	if err != nil {
 		t.Fatalf("create command: %v", err)
 	}

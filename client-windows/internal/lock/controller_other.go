@@ -12,7 +12,7 @@ func NewController() *Controller {
 	return &Controller{}
 }
 
-func (c *Controller) SetLocked(context.Context, bool) error {
+func (c *Controller) SetLocked(context.Context, bool, string) error {
 	return nil
 }
 

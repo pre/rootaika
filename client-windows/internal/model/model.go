@@ -58,6 +58,7 @@ type Command struct {
 	CommandID string      `json:"command_id,omitempty"`
 	ID        json.Number `json:"id,omitempty"`
 	Type      CommandType `json:"type"`
+	Message   string      `json:"message,omitempty"`
 }
 
 func (c Command) Identifier() string {
