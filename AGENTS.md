@@ -37,6 +37,11 @@ Windows-specific syscall wrappers (`*_windows.go`) do not compile/run under Linu
 - **State-change reporting:** the agent compares against the previous observation and sends immediately on change, otherwise at heartbeat intervals.
 - **Resilience:** events are marked sent only after a successful upload; HTTP calls (`internal/api`) retry transient failures (network, 5xx, 429) with exponential backoff (~4 tries, 0.5s→5s), never 4xx. This bridges server restarts in seconds.
 
+### e-ink board (`client-waveshare`) — Python
+- **Hardware:** Raspberry Pi Zero W 1.1 + Waveshare 4.2" e-Paper Module (400x300, Rev 2.1, black/white). The panel speaks SPI over 8 wires; VCC must be 3.3 V (not 5 V). Driver is `epd4in2_V2`. Wiring table and pinout link live in `client-waveshare/README.md`.
+- **`board_display.py`** polls `GET /api/v1/board/today` (client role) and draws today's per-device minutes with Pillow onto the e-ink panel. Refresh interval comes from the server (`board_refresh_seconds` setting) inside the JSON payload, so the Pi has no local interval config. Falls back to a 60 s retry and an offline screen when the server is unreachable.
+- SPI/e-ink hardware does not run under CI or on the dev machine; verify on the real Pi (same manual-verification stance as the Windows `*_windows.go` files).
+
 ## Conventions specific to this repo
 - Server has no third-party HTTP/router/ORM deps; SQLite via `modernc.org/sqlite` (pure Go, no cgo). Keep that constraint, it's what lets the server cross-compile and containerize cleanly.
 - LAN-only, plain HTTP, no TLS by design. Don't add auth hardening or TLS without checking the plan's accepted security limitations.
