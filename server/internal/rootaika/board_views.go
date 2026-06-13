@@ -47,8 +47,7 @@ var boardTemplate = template.Must(template.New("board").Parse(`<!doctype html>
     select { background:#0f1720; color:#e8edf2; border-color:#3a4756; }
     nav.inline a { color:#5eead4; }
     .updated { font-size:.95rem; }
-    .two { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-    @media (max-width: 1100px){ .two { grid-template-columns:1fr; } }
+    .stacked { display:grid; gap:18px; }
   </style>
 </head>
 <body>
@@ -78,7 +77,7 @@ var boardTemplate = template.Must(template.New("board").Parse(`<!doctype html>
         <h2 style="margin:0">Ohjelmat laitteittain</h2>
         <label class="inline">Laite: <select id="device-select"></select></label>
       </div>
-      <div class="two" style="margin-top:14px">
+      <div class="stacked" style="margin-top:14px">
         <div>
           <p class="muted">Kehitys tänään</p>
           <div id="program-line"></div>
