@@ -6,6 +6,8 @@
 #
 #   make build                 build dist/rootaika-mac release binary (version "dev")
 #   make build VERSION=v1.2.0  build with a version label
+#   make install               build release, install binary, load LaunchAgent
+#   make uninstall             unload LaunchAgent and remove installed binary
 #   make release VERSION=v1.2.0  build + publish a GitHub release (needs gh)
 #   make test                  swift test
 #   make                       same as build
@@ -14,12 +16,18 @@
 VERSION ?= dev
 SCRIPTS := scripts
 
-.PHONY: all build release test clean help
+.PHONY: all build install uninstall release test clean help
 
 all: build
 
 build:
 	$(SCRIPTS)/build.sh "$(VERSION)"
+
+install:
+	./packaging/install.sh
+
+uninstall:
+	./packaging/install.sh uninstall
 
 # release.sh requires a real version tag (it refuses without one); guard here so
 # `make release` without VERSION fails fast with a useful message.
