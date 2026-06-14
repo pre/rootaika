@@ -269,15 +269,19 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
   char sv[16]; soundVersionStr(sv, sizeof(sv));
   if (sv[0]) {
     // Show the uploaded filename and size (plus upload time) instead of a bare
-    // version counter.
+    // version counter. The size is read live from LittleFS so it is correct even
+    // for a sound uploaded before the metadata was tracked.
+    long bytes = g_settings.soundSize;
+    { File sf = LittleFS.open("/warning.mp3", "r"); if (sf) { bytes = (long)sf.size(); sf.close(); } }
     c.print(F("<p class=muted>Tiedosto: <code>"));
     htmlEscape(c, g_settings.soundName[0] ? g_settings.soundName : "warning.mp3");
     c.print(F("</code> ("));
-    char sz[24]; formatBytes(sz, sizeof(sz), g_settings.soundSize);
+    char sz[24]; formatBytes(sz, sizeof(sz), bytes);
     c.print(sz);
     c.print(F(")"));
     if (g_settings.soundAt[0]) { c.print(F(", ladattu ")); htmlEscape(c, g_settings.soundAt); }
     c.print(F(". Client soittaa t\xC3\xA4m\xC3\xA4n varoituksen aikana.</p>"));
+    c.print(F("<p><a href='/api/v1/warning-sound'>Lataa \xC3\xA4\xC3\xA4ni koneelle</a></p>"));
   } else {
     c.print(F("<p class=muted>Ei \xC3\xA4\xC3\xA4nt\xC3\xA4 asetettu. Varoitus n\xC3\xA4kyy ruudulla mutta \xC3\xA4\xC3\xA4nt\xC3\xA4 ei soiteta.</p>"));
   }

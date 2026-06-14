@@ -321,6 +321,8 @@ void handleWarningSound(WiFiClient& c) {
   if (!f) { c.print(F("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")); c.flush(); c.stop(); return; }
   c.print(F("HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nETag: \""));
   c.print(g_settings.soundVer);
+  c.print(F("\"\r\nContent-Disposition: attachment; filename=\""));
+  jsonEscape(c, g_settings.soundName[0] ? g_settings.soundName : "warning.mp3");
   c.print(F("\"\r\nContent-Length: "));
   c.print((long)f.size());
   c.print(F("\r\nConnection: close\r\n\r\n"));
