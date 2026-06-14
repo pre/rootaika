@@ -24,7 +24,11 @@ FS        := 4194304
 FQBN      := rp2040:rp2040:challenger_2040_wifi:flash=$(FLASH)_$(FS)
 BUILD_DIR := build
 
-ARDUINO_CLI := arduino-cli
+# Resolve arduino-cli from PATH, else the common Homebrew prefixes — a
+# non-login shell (e.g. ssh "make build") often lacks /opt/homebrew/bin on PATH.
+ARDUINO_CLI := $(shell command -v arduino-cli 2>/dev/null || \
+	for p in /opt/homebrew/bin/arduino-cli /usr/local/bin/arduino-cli; do \
+		[ -x "$$p" ] && { echo "$$p"; break; }; done)
 PORT        ?=
 VERBOSE     ?=
 V_FLAG      := $(if $(VERBOSE),--verbose,)
@@ -34,8 +38,8 @@ V_FLAG      := $(if $(VERBOSE),--verbose,)
 all: build flash
 
 build: $(SKETCH)/wifi.h
-	@command -v $(ARDUINO_CLI) >/dev/null 2>&1 || { \
-		echo "error: arduino-cli not found in PATH (see README.md)" >&2; exit 1; }
+	@test -n "$(ARDUINO_CLI)" && command -v $(ARDUINO_CLI) >/dev/null 2>&1 || { \
+		echo "error: arduino-cli not found on PATH or in /opt/homebrew/bin, /usr/local/bin (see README.md)" >&2; exit 1; }
 	$(ARDUINO_CLI) compile $(V_FLAG) \
 		--fqbn "$(FQBN)" \
 		--build-path "$(BUILD_DIR)" \
@@ -45,8 +49,8 @@ build: $(SKETCH)/wifi.h
 # `make build` reflashes the exact bytes you compiled. Falls back to building if
 # nothing has been built yet.
 flash: $(SKETCH)/wifi.h
-	@command -v $(ARDUINO_CLI) >/dev/null 2>&1 || { \
-		echo "error: arduino-cli not found in PATH (see README.md)" >&2; exit 1; }
+	@test -n "$(ARDUINO_CLI)" && command -v $(ARDUINO_CLI) >/dev/null 2>&1 || { \
+		echo "error: arduino-cli not found on PATH or in /opt/homebrew/bin, /usr/local/bin (see README.md)" >&2; exit 1; }
 	@test -d "$(BUILD_DIR)" || { echo "no $(BUILD_DIR)/ yet; run 'make build' first" >&2; exit 1; }
 	$(eval RESOLVED_PORT := $(if $(PORT),$(PORT),$(shell $(ARDUINO_CLI) board list 2>/dev/null | awk '/challenger|rp2040|RP2040|Pico/ {print $$1; exit}')))
 	@test -n "$(RESOLVED_PORT)" || { \
