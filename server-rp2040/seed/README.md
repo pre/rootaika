@@ -77,8 +77,8 @@ If the board is already running on the LAN, feed it over the client API rather
 than reflashing:
 
 ```sh
-./seed.py --push http://nappi.local           # client:client basic auth
-./seed.py --push http://nappi.local --no-files # push only, leave seed/ as-is
+./seed.py --push http://rootaika.local           # client:client basic auth
+./seed.py --push http://rootaika.local --no-files # push only, leave seed/ as-is
 ```
 
 This POSTs to `/api/v1/events/batch` in small batches (board body limit ~8 KB).

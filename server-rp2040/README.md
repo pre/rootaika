@@ -119,5 +119,5 @@ arduino-cli compile --fqbn "$FQBN" RootaikaServer
 arduino-cli upload  --fqbn "$FQBN" -p /dev/cu.usbmodemXXXX RootaikaServer
 ```
 
-The server advertises mDNS as `nappi.local`, so clients can target
-`http://nappi.local`.
+The server advertises mDNS as `rootaika.local`, so clients can target
+`http://rootaika.local`.

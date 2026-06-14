@@ -20,7 +20,7 @@ Usage:
   ./seed.py                       # (re)generate seed/ files (deterministic)
   ./seed.py --devices 6 --days 30 --max-minutes 400
   ./seed.py --random-seed         # non-deterministic data
-  ./seed.py --push http://nappi.local   # feed a LIVE board over the client API
+  ./seed.py --push http://rootaika.local   # feed a LIVE board over the client API
 
 Flashing the generated files onto the board (host with mklittlefs):
   mklittlefs -c seed -s 4194304 littlefs.bin   # 4 MB FS, see README
@@ -268,7 +268,7 @@ def main():
     ap.add_argument("--random-seed", action="store_true",
                     help="non-deterministic output (default is reproducible)")
     ap.add_argument("--push", metavar="URL",
-                    help="also POST the data to a live board, e.g. http://nappi.local")
+                    help="also POST the data to a live board, e.g. http://rootaika.local")
     ap.add_argument("--batch-size", type=int, default=20,
                     help="events per POST when pushing (default 20, board body limit ~8KB)")
     ap.add_argument("--no-files", action="store_true",

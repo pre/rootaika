@@ -1,5 +1,5 @@
 /*
-  nappi — rootaika server on iLabs Challenger RP2040 WiFi (ESP-AT WiFi).
+  rootaika server on iLabs Challenger RP2040 WiFi (ESP-AT WiFi).
 
   This board IS the rootaika screen-time server (a hardware build alongside the
   Go server/). Clients (macOS / Windows agents) talk to it over the rootaika
@@ -37,7 +37,7 @@
 const char* WIFI_SSID = SECRET_SSID;
 const char* WIFI_PASS = SECRET_PASS;
 
-const char* HOSTNAME   = "nappi";   // -> nappi.local
+const char* HOSTNAME   = "rootaika";   // -> rootaika.local
 const int   BUTTON_PIN = 2;         // GPIO2 = Feather "D5". Button between pin and GND.
 
 // HTTP Basic Auth expected header values (client:client / admin:admin -> base64).
@@ -764,15 +764,15 @@ void setup() {
   Serial.begin(115200);
   uint32_t t0 = millis();
   while (!Serial && millis() - t0 < 1500) {}
-  Serial.println(F("\n[nappi] booting (rootaika server)"));
+  Serial.println(F("\n[rootaika] booting (rootaika server)"));
 
   if (!LittleFS.begin()) {
-    Serial.println(F("[nappi] LittleFS mount failed -> formatting"));
+    Serial.println(F("[rootaika] LittleFS mount failed -> formatting"));
     LittleFS.format();
     LittleFS.begin();
   }
   storageBegin();
-  Serial.print(F("[nappi] devices=")); Serial.print(g_deviceCount);
+  Serial.print(F("[rootaika] devices=")); Serial.print(g_deviceCount);
   Serial.print(F(" users=")); Serial.print(g_userCount);
   Serial.print(F(" categories=")); Serial.println(g_categoryCount);
   applyLockLed();
@@ -781,27 +781,27 @@ void setup() {
   delay(50);
   WiFi.init(Serial2);
   if (WiFi.status() == WL_NO_MODULE)
-    Serial.println(F("[nappi] ERROR: ESP-AT module not found on Serial2"));
+    Serial.println(F("[rootaika] ERROR: ESP-AT module not found on Serial2"));
 
-  Serial.print(F("[nappi] connecting WiFi: ")); Serial.println(WIFI_SSID);
+  Serial.print(F("[rootaika] connecting WiFi: ")); Serial.println(WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) { delay(500); Serial.print('.'); }
   Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.print(F("[nappi] connected, IP: ")); Serial.println(WiFi.localIP());
+    Serial.print(F("[rootaika] connected, IP: ")); Serial.println(WiFi.localIP());
     if (WiFi.startMDNS(HOSTNAME, "http", 80))
-      Serial.println(F("[nappi] mDNS -> http://nappi.local/"));
+      Serial.println(F("[rootaika] mDNS -> http://rootaika.local/"));
     // SNTP for version-report timestamps (the board has no RTC). Best-effort:
     // give the ESP-AT firmware a few seconds to fetch time, then carry on.
     WiFi.sntp("pool.ntp.org", "time.nist.gov");
     for (int i = 0; i < 10 && !clockSync(); i++) delay(500);
-    if (g_clockEpochBase) { char t[24]; nowUtcString(t, sizeof(t)); Serial.print(F("[nappi] clock synced: ")); Serial.println(t); }
-    else                    Serial.println(F("[nappi] clock NOT synced (version timestamps blank until NTP responds)"));
+    if (g_clockEpochBase) { char t[24]; nowUtcString(t, sizeof(t)); Serial.print(F("[rootaika] clock synced: ")); Serial.println(t); }
+    else                    Serial.println(F("[rootaika] clock NOT synced (version timestamps blank until NTP responds)"));
     server.begin(5, 3);
-    Serial.println(F("[nappi] rootaika server on :80"));
+    Serial.println(F("[rootaika] rootaika server on :80"));
   } else {
-    Serial.println(F("[nappi] WiFi FAILED - check SSID/password"));
+    Serial.println(F("[rootaika] WiFi FAILED - check SSID/password"));
   }
 }
 
