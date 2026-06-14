@@ -245,6 +245,124 @@ func assertDeviceLock(t *testing.T, app *App, clientUUID string, wantLocked bool
 	}
 }
 
+func TestLockStatusRequiresAuth(t *testing.T) {
+	app := testApp(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/lock", nil)
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", recorder.Code)
+	}
+}
+
+func TestLockStatusReflectsGlobalStateAndTracksToggle(t *testing.T) {
+	app := testApp(t)
+	ctx := context.Background()
+
+	if err := app.store.CreateUser(ctx, "Pekka", app.now()); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	users, err := app.store.Users(ctx)
+	if err != nil {
+		t.Fatalf("users: %v", err)
+	}
+	userID := users[0].ID
+
+	// Two assigned devices, plus one unassigned that must not affect the count.
+	for _, uuid := range []string{"client-1", "client-2"} {
+		device, err := app.store.EnsureDevice(ctx, uuid, app.now())
+		if err != nil {
+			t.Fatalf("ensure device %s: %v", uuid, err)
+		}
+		if err := app.store.UpdateDevice(ctx, device.ID, device.DisplayName, &userID); err != nil {
+			t.Fatalf("assign device %s: %v", uuid, err)
+		}
+	}
+	if _, err := app.store.EnsureDevice(ctx, "client-unassigned", app.now()); err != nil {
+		t.Fatalf("ensure unassigned device: %v", err)
+	}
+
+	// Initially everything is unlocked.
+	locked, lockedCount, totalCount := lockStatus(t, app)
+	if locked || lockedCount != 0 || totalCount != 2 {
+		t.Fatalf("initial status: locked=%v lockedCount=%d totalCount=%d, want false/0/2", locked, lockedCount, totalCount)
+	}
+
+	// After a button press the global state must read as locked.
+	if pressed, _ := pressBoardButton(t, app); !pressed {
+		t.Fatalf("expected press to lock")
+	}
+	locked, lockedCount, totalCount = lockStatus(t, app)
+	if !locked || lockedCount != 2 || totalCount != 2 {
+		t.Fatalf("locked status: locked=%v lockedCount=%d totalCount=%d, want true/2/2", locked, lockedCount, totalCount)
+	}
+
+	// A second press releases, and status returns to unlocked.
+	if pressed, _ := pressBoardButton(t, app); pressed {
+		t.Fatalf("expected second press to unlock")
+	}
+	locked, lockedCount, _ = lockStatus(t, app)
+	if locked || lockedCount != 0 {
+		t.Fatalf("unlocked status: locked=%v lockedCount=%d, want false/0", locked, lockedCount)
+	}
+}
+
+// TestLockStatusLockedWhenAnyDeviceLocked verifies the global state is "locked"
+// as soon as a single device is locked, matching the toggle's semantics.
+func TestLockStatusLockedWhenAnyDeviceLocked(t *testing.T) {
+	app := testApp(t)
+	ctx := context.Background()
+
+	if err := app.store.CreateUser(ctx, "Pekka", app.now()); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	users, _ := app.store.Users(ctx)
+	userID := users[0].ID
+
+	var firstID int64
+	for i, uuid := range []string{"client-1", "client-2"} {
+		device, err := app.store.EnsureDevice(ctx, uuid, app.now())
+		if err != nil {
+			t.Fatalf("ensure device %s: %v", uuid, err)
+		}
+		if err := app.store.UpdateDevice(ctx, device.ID, device.DisplayName, &userID); err != nil {
+			t.Fatalf("assign device %s: %v", uuid, err)
+		}
+		if i == 0 {
+			firstID = device.ID
+		}
+	}
+	if err := app.store.SetDeviceLock(ctx, firstID, true, "Aika lopettaa", 0, app.now()); err != nil {
+		t.Fatalf("lock one device: %v", err)
+	}
+
+	locked, lockedCount, totalCount := lockStatus(t, app)
+	if !locked || lockedCount != 1 || totalCount != 2 {
+		t.Fatalf("status: locked=%v lockedCount=%d totalCount=%d, want true/1/2", locked, lockedCount, totalCount)
+	}
+}
+
+func lockStatus(t *testing.T, app *App) (bool, int, int) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/lock", nil)
+	request.SetBasicAuth("client", "client")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status code = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Locked      bool `json:"locked"`
+		LockedCount int  `json:"locked_count"`
+		TotalCount  int  `json:"total_count"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode status response: %v", err)
+	}
+	return response.Locked, response.LockedCount, response.TotalCount
+}
+
 func TestSecondsToWholeMinutesRounds(t *testing.T) {
 	cases := map[int64]int{0: 0, 29: 0, 30: 1, 89: 1, 90: 2, 180: 3}
 	for seconds, want := range cases {

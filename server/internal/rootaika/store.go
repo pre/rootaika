@@ -508,6 +508,25 @@ WHERE device_id IN (SELECT id FROM devices WHERE registration_status = 'assigned
 	return int(affected), nil
 }
 
+// GlobalLockState reports the system-wide lock state used by the board button to
+// decide its next action. The system is considered locked when at least one
+// registered (assigned) device is locked, matching ToggleAllLocks' semantics so
+// a status read followed by a toggle stays consistent. It also returns how many
+// assigned devices are currently locked and the total assigned device count.
+func (s *Store) GlobalLockState(ctx context.Context) (locked bool, lockedCount int, totalCount int, err error) {
+	err = s.db.QueryRowContext(ctx, `
+SELECT
+  COUNT(*),
+  COALESCE(SUM(CASE WHEN c.locked = 1 THEN 1 ELSE 0 END), 0)
+FROM devices d
+JOIN device_config c ON c.device_id = d.id
+WHERE d.registration_status = 'assigned'`).Scan(&totalCount, &lockedCount)
+	if err != nil {
+		return false, 0, 0, err
+	}
+	return lockedCount > 0, lockedCount, totalCount, nil
+}
+
 // RecordDeviceStatus stores the state the client reported about itself during a
 // config poll (active/idle/locked). The admin UI uses this as the lock
 // acknowledgement: a device shows "lukittu" only once it reports locked, not

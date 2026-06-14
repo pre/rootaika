@@ -49,6 +49,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleEventsBatch(w, r)
 	case r.URL.Path == "/api/v1/client/config":
 		a.handleClientConfig(w, r)
+	case r.URL.Path == "/api/v1/lock" && r.Method == http.MethodGet:
+		a.handleLockStatus(w, r)
 	case r.URL.Path == "/api/v1/lock":
 		a.handleBoardButton(w, r)
 	case r.URL.Path == "/api/v1/unlock":

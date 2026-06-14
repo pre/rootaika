@@ -48,6 +48,31 @@ func (a *App) handleBoardButton(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleLockStatus reports the system-wide lock state so the board button can
+// query what the system currently is before deciding its next action. Lock is
+// per-device, but the button operates on the global state: locked means at least
+// one registered device is locked, matching what a toggle would flip.
+func (a *App) handleLockStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if _, ok := a.requireRole(w, r, RoleAdmin, RoleClient); !ok {
+		return
+	}
+
+	locked, lockedCount, totalCount, err := a.store.GlobalLockState(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "lock status failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"locked":       locked,
+		"locked_count": lockedCount,
+		"total_count":  totalCount,
+	})
+}
+
 // handleBoardUnlock unconditionally releases the lock on all registered devices.
 // Unlike handleBoardButton it never locks, so the board can use it as a
 // dedicated release control when the current lock state is unknown.
