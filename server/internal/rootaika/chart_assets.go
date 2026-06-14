@@ -2,12 +2,14 @@ package rootaika
 
 // chartNav is the shared top navigation, identical on every page. Links are
 // absolute so they work from any view. Laitteet, Käyttäjät, Asetukset and
-// Kategoriat all live on the /settings page.
+// Kategoriat all live on the /settings page. Historia shows the lock/unlock
+// history.
 const chartNav = `<nav class="inline">
         <a href="/">Tänään</a>
         <a href="/week">Viikko</a>
         <a href="/month">Kuukausi</a>
         <a href="/board">Taulu</a>
+        <a href="/history">Historia</a>
         <a href="/settings">Asetukset</a>
       </nav>`
 

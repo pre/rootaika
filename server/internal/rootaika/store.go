@@ -154,6 +154,17 @@ CREATE TABLE IF NOT EXISTS auth_credentials (
   password_plaintext TEXT NOT NULL,
   updated_at_utc TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS lock_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+  device_name TEXT NOT NULL DEFAULT '',
+  locked INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  affected INTEGER NOT NULL DEFAULT 0,
+  occurred_at_utc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS lock_audit_time_idx ON lock_audit(occurred_at_utc);
 `)
 	if err != nil {
 		return err
@@ -415,7 +426,26 @@ UPDATE device_config SET locked = ?, lock_message = ?, warning_seconds = ? WHERE
 	if affected == 0 {
 		return fmt.Errorf("device %d has no config row", deviceID)
 	}
+	if err := s.recordLockAudit(ctx, &deviceID, locked, LockSourceAdmin, 1, now); err != nil {
+		return err
+	}
 	return nil
+}
+
+// recordLockAudit appends a row to the lock audit log. For per-device actions
+// deviceID is non-nil and the device name is captured by subquery so the log
+// stays readable even after the device is later renamed or deleted; device-wide
+// board actions pass deviceID == nil.
+func (s *Store) recordLockAudit(ctx context.Context, deviceID *int64, locked bool, source string, affected int, now time.Time) error {
+	name := ""
+	if deviceID != nil {
+		_ = s.db.QueryRowContext(ctx, `SELECT display_name FROM devices WHERE id = ?`, *deviceID).Scan(&name)
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO lock_audit(device_id, device_name, locked, source, affected, occurred_at_utc)
+VALUES (?, ?, ?, ?, ?, ?)`,
+		nullableInt64(deviceID), name, boolToInt(locked), source, affected, formatDBTime(now))
+	return err
 }
 
 // ToggleAllLocks flips the lock state of every registered (assigned) device in a
@@ -455,6 +485,9 @@ WHERE device_id IN (SELECT id FROM devices WHERE registration_status = 'assigned
 	if err != nil {
 		return false, 0, err
 	}
+	if err := s.recordLockAudit(ctx, nil, locked, LockSourceBoardButton, affected, now); err != nil {
+		return false, 0, err
+	}
 	return locked, affected, nil
 }
 
@@ -469,6 +502,9 @@ WHERE device_id IN (SELECT id FROM devices WHERE registration_status = 'assigned
 		return 0, err
 	}
 	affected, _ := result.RowsAffected()
+	if err := s.recordLockAudit(ctx, nil, false, LockSourceBoardUnlock, int(affected), now); err != nil {
+		return 0, err
+	}
 	return int(affected), nil
 }
 
@@ -687,6 +723,86 @@ ON CONFLICT(match_type, pattern, category) DO UPDATE SET category = excluded.cat
 func (s *Store) DeleteCategory(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM program_categories WHERE id = ?`, id)
 	return err
+}
+
+// LockTransitions derives client-reported lock/unlock moments from the
+// append-only events stream. An event whose locked-ness differs from the
+// previous event for the same device (ordered by time) is a transition: into
+// state=locked is a lock, out of it is an unlock. Idle/active are treated as
+// "unlocked" for this purpose. Results are newest first, capped at limit.
+func (s *Store) LockTransitions(ctx context.Context, limit int) ([]LockTransition, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT device_id, device_name, occurred_at_utc, is_locked FROM (
+  SELECT e.device_id AS device_id,
+         COALESCE(d.display_name, '') AS device_name,
+         e.occurred_at_utc AS occurred_at_utc,
+         CASE WHEN e.state = 'locked' THEN 1 ELSE 0 END AS is_locked,
+         LAG(CASE WHEN e.state = 'locked' THEN 1 ELSE 0 END) OVER (
+           PARTITION BY e.device_id ORDER BY e.occurred_at_utc, e.sequence, e.id
+         ) AS prev_locked
+  FROM events e
+  LEFT JOIN devices d ON d.id = e.device_id
+) t
+WHERE prev_locked IS NULL AND is_locked = 1
+   OR prev_locked IS NOT NULL AND is_locked <> prev_locked
+ORDER BY occurred_at_utc DESC
+LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var transitions []LockTransition
+	for rows.Next() {
+		var t LockTransition
+		var occurred string
+		var locked int
+		if err := rows.Scan(&t.DeviceID, &t.DeviceName, &occurred, &locked); err != nil {
+			return nil, err
+		}
+		t.OccurredAt = parseDBTime(occurred)
+		t.Locked = locked != 0
+		transitions = append(transitions, t)
+	}
+	return transitions, rows.Err()
+}
+
+// LockAuditEntries returns recorded admin and board lock actions, newest first,
+// capped at limit.
+func (s *Store) LockAuditEntries(ctx context.Context, limit int) ([]LockAuditEntry, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, device_id, device_name, locked, source, affected, occurred_at_utc
+FROM lock_audit
+ORDER BY occurred_at_utc DESC, id DESC
+LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []LockAuditEntry
+	for rows.Next() {
+		var entry LockAuditEntry
+		var deviceID sql.NullInt64
+		var locked int
+		var occurred string
+		if err := rows.Scan(&entry.ID, &deviceID, &entry.DeviceName, &locked, &entry.Source, &entry.Affected, &occurred); err != nil {
+			return nil, err
+		}
+		if deviceID.Valid {
+			entry.DeviceID = &deviceID.Int64
+		}
+		entry.Locked = locked != 0
+		entry.OccurredAt = parseDBTime(occurred)
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
 }
 
 func (s *Store) ReportEvents(ctx context.Context, deviceID int64, start, end time.Time) ([]ActivityEvent, error) {

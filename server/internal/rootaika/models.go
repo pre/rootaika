@@ -99,6 +99,36 @@ type UsageReport struct {
 	ByProcess    map[string]int64
 }
 
+// LockTransition is a single change of a device's client-reported lock state,
+// derived from the append-only events stream: a device entering state=locked is
+// a lock, leaving it is an unlock.
+type LockTransition struct {
+	DeviceID   int64
+	DeviceName string
+	OccurredAt time.Time
+	Locked     bool
+}
+
+// Lock audit sources record where an admin/board lock action originated.
+const (
+	LockSourceAdmin       = "admin"
+	LockSourceBoardButton = "board-button"
+	LockSourceBoardUnlock = "board-unlock"
+)
+
+// LockAuditEntry is a recorded admin or board lock action. Device-wide board
+// actions have DeviceID == nil (DeviceName is then empty); per-device admin
+// actions name the affected device.
+type LockAuditEntry struct {
+	ID         int64
+	OccurredAt time.Time
+	DeviceID   *int64
+	DeviceName string
+	Locked     bool
+	Source     string
+	Affected   int
+}
+
 func validState(state string) bool {
 	return state == StateActive || state == StateIdle || state == StateLocked
 }
