@@ -196,7 +196,7 @@ actor Core {
                     knownVersion: lastConfigVersion,
                     waitSeconds: config.pollWaitSeconds
                 )
-                applyConfig(cfg)
+                await applyConfig(cfg)
                 if config.debugMode {
                     FileHandle.standardError.write(Data("poll ok: version=\(cfg.configVersion) locked=\(cfg.locked)\n".utf8))
                 }
@@ -212,11 +212,38 @@ actor Core {
         }
     }
 
-    func applyConfig(_ cfg: ClientConfig) {
+    func applyConfig(_ cfg: ClientConfig) async {
         lastConfigVersion = cfg.configVersion
         _ = config.applyServerConfig(cfg)
+        await syncWarningSound(serverVersion: cfg.warningSoundVersion)
         try? config.save()
         applyLockState(locked: cfg.locked, message: cfg.lockMessage, warningSeconds: cfg.warningSeconds)
+    }
+
+    /// Reconcile the cached warning MP3 with the server's version so it is on
+    /// disk before a lock arrives. Best-effort: a download failure is ignored
+    /// (the prior cache stays) and only updates `config.warningSoundVersion`.
+    private func syncWarningSound(serverVersion: String) async {
+        do {
+            let result = try await WarningSound.sync(
+                downloader: board,
+                soundPath: config.warningSoundPath(),
+                cachedVersion: config.warningSoundVersion,
+                serverVersion: serverVersion
+            )
+            switch result {
+            case .unchanged:
+                break
+            case .cleared:
+                config.warningSoundVersion = ""
+            case .updated(let version):
+                config.warningSoundVersion = version
+            }
+        } catch {
+            if config.debugMode {
+                FileHandle.standardError.write(Data("warning sound sync error: \(error)\n".utf8))
+            }
+        }
     }
 
     // MARK: Lock state
@@ -226,30 +253,57 @@ actor Core {
             warningTask?.cancel()
             warningTask = nil
             warned = false
+            lock.hideWarning()
             if lock.isShowing { lock.hideLock() }
             return
         }
 
         // Locked.
         if warningSeconds <= 0 || warned {
+            lock.hideWarning()
             lock.showLock(message: message, warningSeconds: warningSeconds)
             return
         }
 
-        // Pre-lock warning countdown (screen stays usable; engage overlay after).
+        // Pre-lock warning countdown: show the click-through banner with a live
+        // remaining-seconds count and loop the cached warning sound, while the
+        // screen stays usable. Engage the lock overlay only once it elapses. The
+        // sound plays ONLY here, never at the lock moment (matches Windows).
         if warningTask == nil {
+            let soundPath = WarningSound.cachedPath(config)
             warningTask = Task { [weak self] in
-                guard let self = self else { return }
-                try? await Task.sleep(nanoseconds: UInt64(warningSeconds) * 1_000_000_000)
-                if Task.isCancelled { return }
-                await self.completeWarning(message: message, warningSeconds: warningSeconds)
+                await self?.runWarningCountdown(
+                    message: message,
+                    warningSeconds: warningSeconds,
+                    soundPath: soundPath
+                )
             }
         }
+    }
+
+    private func runWarningCountdown(message: String, warningSeconds: Int, soundPath: String) async {
+        lock.startWarningAudio(path: soundPath)
+        var remaining = warningSeconds
+        while remaining > 0 {
+            if Task.isCancelled {
+                lock.hideWarning()
+                return
+            }
+            lock.showWarning(message: message, remainingSeconds: remaining)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            remaining -= 1
+        }
+        if Task.isCancelled {
+            lock.hideWarning()
+            return
+        }
+        completeWarning(message: message, warningSeconds: warningSeconds)
     }
 
     private func completeWarning(message: String, warningSeconds: Int) {
         warned = true
         warningTask = nil
+        lock.hideWarning() // stops the warning sound and banner
         lock.showLock(message: message, warningSeconds: warningSeconds)
     }
 

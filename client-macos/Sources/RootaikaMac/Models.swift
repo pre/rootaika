@@ -108,6 +108,10 @@ struct ClientConfig: Codable, Equatable {
     var lockMessage: String
     /// Countdown before enforcing the lock; 0 = lock immediately.
     var warningSeconds: Int
+    /// Opaque version of the admin-uploaded warning MP3; empty when none is set.
+    /// Changes whenever the admin uploads/removes a sound, so the client knows to
+    /// re-download. Decoded leniently so an older server omitting it is tolerated.
+    var warningSoundVersion: String
     var categories: [CategoryRule]
 
     enum CodingKeys: String, CodingKey {
@@ -121,7 +125,54 @@ struct ClientConfig: Codable, Equatable {
         case locked
         case lockMessage = "lock_message"
         case warningSeconds = "warning_seconds"
+        case warningSoundVersion = "warning_sound_version"
         case categories
+    }
+
+    init(
+        clientID: String,
+        configVersion: String,
+        idleThresholdSeconds: Int,
+        uploadIntervalSeconds: Int,
+        pollIntervalSeconds: Int,
+        maxCountableGapSeconds: Int,
+        debugMode: Bool,
+        locked: Bool,
+        lockMessage: String,
+        warningSeconds: Int,
+        warningSoundVersion: String = "",
+        categories: [CategoryRule]
+    ) {
+        self.clientID = clientID
+        self.configVersion = configVersion
+        self.idleThresholdSeconds = idleThresholdSeconds
+        self.uploadIntervalSeconds = uploadIntervalSeconds
+        self.pollIntervalSeconds = pollIntervalSeconds
+        self.maxCountableGapSeconds = maxCountableGapSeconds
+        self.debugMode = debugMode
+        self.locked = locked
+        self.lockMessage = lockMessage
+        self.warningSeconds = warningSeconds
+        self.warningSoundVersion = warningSoundVersion
+        self.categories = categories
+    }
+
+    // Lenient decode so a server that omits warning_sound_version (older build)
+    // still decodes; the field then defaults to "" (no sound).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        clientID = try c.decode(String.self, forKey: .clientID)
+        configVersion = try c.decode(String.self, forKey: .configVersion)
+        idleThresholdSeconds = try c.decode(Int.self, forKey: .idleThresholdSeconds)
+        uploadIntervalSeconds = try c.decode(Int.self, forKey: .uploadIntervalSeconds)
+        pollIntervalSeconds = try c.decode(Int.self, forKey: .pollIntervalSeconds)
+        maxCountableGapSeconds = try c.decode(Int.self, forKey: .maxCountableGapSeconds)
+        debugMode = try c.decode(Bool.self, forKey: .debugMode)
+        locked = try c.decode(Bool.self, forKey: .locked)
+        lockMessage = try c.decode(String.self, forKey: .lockMessage)
+        warningSeconds = try c.decode(Int.self, forKey: .warningSeconds)
+        warningSoundVersion = try c.decodeIfPresent(String.self, forKey: .warningSoundVersion) ?? ""
+        categories = try c.decodeIfPresent([CategoryRule].self, forKey: .categories) ?? []
     }
 }
 

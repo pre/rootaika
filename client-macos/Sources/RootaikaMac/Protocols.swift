@@ -18,6 +18,11 @@ protocol BoardClienting {
         knownVersion: String?,
         waitSeconds: Int
     ) async throws -> ClientConfig
+
+    /// Download the admin-uploaded lock-warning MP3 (GET /api/v1/warning-sound).
+    /// Returns the raw audio bytes; throws on a 404 (no sound configured) or any
+    /// transport error so the caller can leave the cache untouched.
+    func downloadWarningSound() async throws -> Data
 }
 
 /// Samples local user activity. Implemented by MacActivityProbe.
@@ -40,4 +45,16 @@ protocol LockControlling {
 
     /// Whether the overlay is currently engaged.
     var isShowing: Bool { get }
+
+    /// Show / refresh the pre-lock warning banner with the remaining seconds.
+    func showWarning(message: String, remainingSeconds: Int)
+
+    /// Tear down the warning banner and stop its sound.
+    func hideWarning()
+
+    /// Start looping the warning MP3 at `path` for the countdown (best-effort).
+    func startWarningAudio(path: String)
+
+    /// Stop the looping warning sound.
+    func stopWarningAudio()
 }

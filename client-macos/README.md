@@ -67,7 +67,7 @@ An existing config that still has the old loopback default
 
 This client installs as a **per-user LaunchAgent**, because the things it must do
 — read idle time, observe the frontmost app, draw the shielding overlay, hide the
-cursor, speak via AVSpeechSynthesizer — all require an **interactive GUI (Aqua)
+cursor, play the warning sound — all require an **interactive GUI (Aqua)
 session**. A root `LaunchDaemon` runs at boot with no GUI session and cannot do
 these things.
 
@@ -79,7 +79,7 @@ agent; the durable, non-user-killable half is the service. The kid-proof macOS
 equivalent is a two-process split:
 
 - a root **LaunchDaemon** owning the network/storage/coordination tier (no UI), and
-- a per-user **LaunchAgent** doing activity sampling + the overlay/TTS,
+- a per-user **LaunchAgent** doing activity sampling + the overlay/warning sound,
 
 with the daemon (re)launching and supervising the agent. This scaffold ships the
 single LaunchAgent; the hardened daemon split is future work.
@@ -92,9 +92,21 @@ Grant in **System Settings > Privacy & Security**:
   system-wide idle detection. (`CGEventSourceSecondsSinceLastEventType` works
   without entitlements in most cases, but Input Monitoring/Accessibility makes it
   robust and is required if input is captured.)
-- A **Finnish system voice** (System Settings > Accessibility > Spoken Content >
-  System Voices / Manage Voices) for the spoken `fi-FI` lock countdown; falls back
-  to the default voice if absent.
+No extra audio setup is required. The pre-lock warning sound is an MP3 the admin
+uploads on the server; the client downloads it from `GET /api/v1/warning-sound`,
+caches it at `~/Library/Application Support/rootaika/warning-sound.mp3`, and
+re-downloads only when the server's `warning_sound_version` changes. If no sound
+is configured the warning is silent.
 
 Reading the frontmost application name via `NSWorkspace.frontmostApplication`
 needs no special entitlement.
+
+## Lock and pre-lock warning
+
+The lock overlay is a full-screen green shield (matching the Windows client) with
+"rootaika" and the admin message centered in white. When the server requests a
+lock with a `warning_seconds` countdown, the client first shows a translucent,
+click-through banner counting down "X sekuntia/minuuttia jäljellä ennen lukitusta"
+while the screen stays usable, and loops the cached warning MP3 for the duration.
+The sound plays only during this countdown, never at the lock moment. An unlock
+during the countdown cancels both the banner and the sound.

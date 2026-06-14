@@ -13,6 +13,11 @@ let package = Package(
         .executableTarget(
             name: "RootaikaMac",
             path: "Sources/RootaikaMac"
+        ),
+        .testTarget(
+            name: "RootaikaMacTests",
+            dependencies: ["RootaikaMac"],
+            path: "Tests/RootaikaMacTests"
         )
     ]
 )

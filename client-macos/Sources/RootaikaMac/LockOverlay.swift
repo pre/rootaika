@@ -4,22 +4,28 @@ import AVFoundation
 
 /// Drives the full-screen lock overlay.
 ///
-/// `showLock` engages an opaque black borderless `NSWindow` on EVERY screen at
+/// `showLock` engages an opaque green borderless `NSWindow` on EVERY screen at
 /// `CGShieldingWindowLevel()` (above the menu bar), applies a kiosk
 /// `NSApp.presentationOptions` set so Cmd-Tab / Cmd-Q / Mission Control are
 /// blocked, hides the cursor, swallows key/mouse events, and shows the admin
-/// message centered in large white text. `hideLock` tears everything down and
+/// message centered in large white text. The green matches the Windows lock
+/// overlay (`controller_windows.go`). `hideLock` tears everything down and
 /// restores the previous presentation options.
 ///
-/// The pre-lock WARNING countdown is owned by `Core` (it sleeps for
-/// `warningSeconds` and only then calls `showLock`). This controller still
-/// exposes `showWarning(message:remainingSeconds:)` / `hideWarning()` so the
-/// caller may optionally drive a click-through banner during that countdown;
-/// the banner is non-activating, semi-transparent, and does not block input.
+/// The pre-lock WARNING countdown is owned by `Core`. This controller exposes
+/// `showWarning(message:remainingSeconds:)` / `hideWarning()` to drive a
+/// click-through banner during that countdown, and `startWarningAudio` /
+/// `stopWarningAudio` to loop the admin-uploaded MP3 for its duration. Matching
+/// Windows, audio plays ONLY during the warning, never at the lock moment.
 ///
 /// All UI mutation is dispatched to the main thread; the public flags
 /// (`isShowing`) are guarded so calls are safe from the `Core` actor.
 final class MacLockController: LockControlling {
+
+    /// Lock overlay background. Matches the Windows green RGB(22,163,74).
+    static let lockBackgroundColor = NSColor(
+        srgbRed: 22.0 / 255.0, green: 163.0 / 255.0, blue: 74.0 / 255.0, alpha: 1.0
+    )
 
     // MARK: State (guarded by `stateLock`)
 
@@ -42,7 +48,7 @@ final class MacLockController: LockControlling {
 
     private var currentMessage: String = ""
 
-    // Audio (best-effort).
+    // Looping warning sound, playing only during the pre-lock countdown (best-effort).
     private var audioPlayer: AVAudioPlayer?
 
     init() {}
@@ -69,7 +75,8 @@ final class MacLockController: LockControlling {
             self.startKeepOnTopTimer()
             self.installKeyMonitor()
             self.hideCursorIfNeeded()
-            self.playLockAudioIfPresent()
+            // No audio at the lock moment: the warning sound, if any, played
+            // during the countdown and is stopped before the lock engages.
 
             self.setShowing(true)
         }
@@ -77,7 +84,7 @@ final class MacLockController: LockControlling {
 
     func hideLock() {
         runOnMain {
-            self.stopLockAudio()
+            self.stopWarningAudio()
             self.tearDownWarningWindows()
             self.tearDownLockWindows()
             self.removeKeyMonitor()
@@ -105,9 +112,42 @@ final class MacLockController: LockControlling {
         }
     }
 
-    /// Tear down the warning banner (e.g. on unlock-during-countdown).
+    /// Tear down the warning banner and stop its looping sound (e.g. on
+    /// unlock-during-countdown, or just before the lock engages).
     func hideWarning() {
-        runOnMain { self.tearDownWarningWindows() }
+        runOnMain {
+            self.stopWarningAudio()
+            self.tearDownWarningWindows()
+        }
+    }
+
+    /// Start looping the warning MP3 at `path` for the duration of the countdown.
+    /// Best-effort: a missing/empty path or a decode error is silent and never
+    /// blocks the lock. Safe to call repeatedly; a second call is a no-op while a
+    /// sound is already playing.
+    func startWarningAudio(path: String) {
+        runOnMain {
+            guard !path.isEmpty, self.audioPlayer == nil else { return }
+            let url = URL(fileURLWithPath: path)
+            guard FileManager.default.fileExists(atPath: url.path) else { return }
+            do {
+                let player = try AVAudioPlayer(contentsOf: url)
+                player.numberOfLoops = -1 // loop until stopped
+                player.prepareToPlay()
+                player.play()
+                self.audioPlayer = player
+            } catch {
+                self.audioPlayer = nil
+            }
+        }
+    }
+
+    /// Stop the looping warning sound if it is playing.
+    func stopWarningAudio() {
+        runOnMain {
+            self.audioPlayer?.stop()
+            self.audioPlayer = nil
+        }
     }
 
     // MARK: - Lock windows
@@ -123,7 +163,7 @@ final class MacLockController: LockControlling {
                 screen: screen
             )
             window.isReleasedWhenClosed = false
-            window.backgroundColor = .black
+            window.backgroundColor = Self.lockBackgroundColor
             window.isOpaque = true
             window.hasShadow = false
             window.level = NSWindow.Level(rawValue: level)
@@ -215,7 +255,7 @@ final class MacLockController: LockControlling {
     }
 
     private func updateWarningText(message: String, remainingSeconds: Int) {
-        var text = "\(max(0, remainingSeconds)) s jaljella ennen lukitusta"
+        var text = Self.formatRemaining(max(0, remainingSeconds))
         if !message.isEmpty {
             text += "\n" + message
         }
@@ -234,6 +274,19 @@ final class MacLockController: LockControlling {
             window.contentView = nil
         }
         warningWindows.removeAll()
+    }
+
+    /// Finnish countdown label, matching the Windows warn overlay
+    /// (`controller_windows.go` Format-Remaining): minutes (ceil) above 60s,
+    /// seconds at or below, with singular/plural forms.
+    static func formatRemaining(_ seconds: Int) -> String {
+        if seconds > 60 {
+            let minutes = Int((Double(seconds) / 60.0).rounded(.up))
+            if minutes == 1 { return "1 minuutti jaljella ennen lukitusta" }
+            return "\(minutes) minuuttia jaljella ennen lukitusta"
+        }
+        if seconds == 1 { return "1 sekunti jaljella ennen lukitusta" }
+        return "\(seconds) sekuntia jaljella ennen lukitusta"
     }
 
     // MARK: - Kiosk presentation options
@@ -327,46 +380,6 @@ final class MacLockController: LockControlling {
         }
     }
 
-    // MARK: - Audio (best-effort)
-
-    private func playLockAudioIfPresent() {
-        guard let url = Self.lockVoiceFileURL() else { return }
-        do {
-            let player = try AVAudioPlayer(contentsOf: url)
-            player.prepareToPlay()
-            player.play()
-            audioPlayer = player
-        } catch {
-            // Best-effort: ignore missing/unreadable audio. Never block the lock.
-            audioPlayer = nil
-        }
-    }
-
-    private func stopLockAudio() {
-        audioPlayer?.stop()
-        audioPlayer = nil
-    }
-
-    /// Resolve ~/Library/Application Support/rootaika/lock-voice.* if present.
-    private static func lockVoiceFileURL() -> URL? {
-        let base = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/rootaika", isDirectory: true)
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(
-            at: base,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else { return nil }
-        // Match lock-voice.<ext> for common audio extensions.
-        let audioExts: Set<String> = ["m4a", "mp3", "aac", "wav", "aiff", "aif", "caf"]
-        for url in entries where url.deletingPathExtension().lastPathComponent == "lock-voice" {
-            if audioExts.contains(url.pathExtension.lowercased()) {
-                return url
-            }
-        }
-        return nil
-    }
-
     // MARK: - Helpers
 
     private func setShowing(_ value: Bool) {
@@ -389,7 +402,7 @@ final class MacLockController: LockControlling {
 
 // MARK: - Lock content view
 
-/// Opaque black view that draws the centered "rootaika" + admin message and
+/// Opaque green view that draws the centered "rootaika" + admin message and
 /// swallows mouse / key events so the user can't interact past the overlay.
 private final class LockContentView: NSView {
     private let label = NSTextField(labelWithString: "rootaika")
@@ -401,7 +414,7 @@ private final class LockContentView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
+        layer?.backgroundColor = MacLockController.lockBackgroundColor.cgColor
 
         label.font = .boldSystemFont(ofSize: 48)
         label.textColor = .white

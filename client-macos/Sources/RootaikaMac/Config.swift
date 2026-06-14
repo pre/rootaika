@@ -26,6 +26,10 @@ struct Config: Codable, Equatable {
     var lockMessage: String
     var lockWarningSeconds: Int
     var debugMode: Bool
+    /// Version of the locally cached warning MP3, last reconciled with the
+    /// server. Empty means no sound is cached. Managed by syncWarningSound, not
+    /// applyServerConfig (mirrors the Windows client).
+    var warningSoundVersion: String
 
     enum CodingKeys: String, CodingKey {
         case serverURL = "server_url"
@@ -43,6 +47,7 @@ struct Config: Codable, Equatable {
         case lockMessage = "lock_message"
         case lockWarningSeconds = "lock_warning_seconds"
         case debugMode = "debug_mode"
+        case warningSoundVersion = "warning_sound_version"
     }
 
     // MARK: Defaults
@@ -63,7 +68,8 @@ struct Config: Codable, Equatable {
             locked: false,
             lockMessage: "",
             lockWarningSeconds: 0,
-            debugMode: false
+            debugMode: false,
+            warningSoundVersion: ""
         )
     }
 
@@ -84,6 +90,13 @@ struct Config: Codable, Equatable {
 
     static func defaultDBPath() -> URL {
         defaultBaseDir().appendingPathComponent("rootaika-client.db", isDirectory: false)
+    }
+
+    /// Local path of the cached warning MP3, alongside config.json. The agent
+    /// passes this to the lock controller so it can loop the sound during the
+    /// pre-lock countdown.
+    func warningSoundPath() -> URL {
+        Config.defaultBaseDir().appendingPathComponent("warning-sound.mp3", isDirectory: false)
     }
 
     // MARK: Load / Save
@@ -217,5 +230,6 @@ extension Config {
         lockMessage = try c.decodeIfPresent(String.self, forKey: .lockMessage) ?? d.lockMessage
         lockWarningSeconds = try c.decodeIfPresent(Int.self, forKey: .lockWarningSeconds) ?? d.lockWarningSeconds
         debugMode = try c.decodeIfPresent(Bool.self, forKey: .debugMode) ?? d.debugMode
+        warningSoundVersion = try c.decodeIfPresent(String.self, forKey: .warningSoundVersion) ?? d.warningSoundVersion
     }
 }

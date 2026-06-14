@@ -94,6 +94,23 @@ final class NetworkBoardClient: BoardClienting {
         return try RootaikaJSON.makeDecoder().decode(ClientConfig.self, from: data)
     }
 
+    /// Download the admin-uploaded warning MP3. The body is audio/mpeg, returned
+    /// verbatim. A 404 (no sound set) surfaces as a thrown NetworkError so the
+    /// caller leaves any existing cache untouched on transient failures and only
+    /// clears it on an explicit empty server version (handled in syncWarningSound).
+    func downloadWarningSound() async throws -> Data {
+        let url = try makeURL(path: "/api/v1/warning-sound", queryItems: nil)
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = standardTimeout
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        applyBasicAuth(&request)
+
+        let (data, response) = try await performWithRetry(request, timeout: standardTimeout)
+        try ensureSuccess(data: data, response: response)
+        return data
+    }
+
     // MARK: - Request building
 
     private func makeURL(path: String, queryItems: [URLQueryItem]?) throws -> URL {
