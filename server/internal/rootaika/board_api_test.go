@@ -155,6 +155,65 @@ func TestBoardButtonTogglesAllAssignedDevices(t *testing.T) {
 	assertDeviceLock(t, app, "client-2", false, "")
 }
 
+func TestBoardUnlockRequiresAuth(t *testing.T) {
+	app := testApp(t)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/board/unlock", nil)
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", recorder.Code)
+	}
+}
+
+func TestBoardUnlockReleasesAssignedDevices(t *testing.T) {
+	app := testApp(t)
+	ctx := context.Background()
+
+	if err := app.store.CreateUser(ctx, "Pekka", app.now()); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	users, err := app.store.Users(ctx)
+	if err != nil {
+		t.Fatalf("users: %v", err)
+	}
+	userID := users[0].ID
+
+	for _, uuid := range []string{"client-1", "client-2"} {
+		device, err := app.store.EnsureDevice(ctx, uuid, app.now())
+		if err != nil {
+			t.Fatalf("ensure device %s: %v", uuid, err)
+		}
+		if err := app.store.UpdateDevice(ctx, device.ID, device.DisplayName, &userID); err != nil {
+			t.Fatalf("assign device %s: %v", uuid, err)
+		}
+		if err := app.store.SetDeviceLock(ctx, device.ID, true, "Aika lopettaa", 30, app.now()); err != nil {
+			t.Fatalf("lock device %s: %v", uuid, err)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/board/unlock", nil)
+	request.SetBasicAuth("client", "client")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unlock status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Locked   bool `json:"locked"`
+		Affected int  `json:"affected"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode unlock response: %v", err)
+	}
+	if response.Locked || response.Affected != 2 {
+		t.Fatalf("unlock: locked=%v affected=%d, want false/2", response.Locked, response.Affected)
+	}
+
+	assertDeviceLock(t, app, "client-1", false, "")
+	assertDeviceLock(t, app, "client-2", false, "")
+}
+
 func pressBoardButton(t *testing.T, app *App) (bool, int) {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/board/button", nil)

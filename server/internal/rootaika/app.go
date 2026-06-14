@@ -49,6 +49,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleClientConfig(w, r)
 	case r.URL.Path == "/api/v1/board/button":
 		a.handleBoardButton(w, r)
+	case r.URL.Path == "/api/v1/board/unlock":
+		a.handleBoardUnlock(w, r)
 	case stringsHasPrefix(r.URL.Path, "/admin/"):
 		a.handleAdmin(w, r)
 	default:

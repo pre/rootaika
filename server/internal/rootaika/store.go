@@ -458,6 +458,20 @@ WHERE device_id IN (SELECT id FROM devices WHERE registration_status = 'assigned
 	return locked, affected, nil
 }
 
+// UnlockAllLocks unconditionally clears the lock on every registered (assigned)
+// device and returns the number of devices affected. Unlike ToggleAllLocks it
+// never locks, so it is safe to call when the current state is unknown.
+func (s *Store) UnlockAllLocks(ctx context.Context, now time.Time) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE device_config SET locked = 0, lock_message = '', warning_seconds = 0
+WHERE device_id IN (SELECT id FROM devices WHERE registration_status = 'assigned')`)
+	if err != nil {
+		return 0, err
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
+}
+
 // RecordDeviceStatus stores the state the client reported about itself during a
 // config poll (active/idle/locked). The admin UI uses this as the lock
 // acknowledgement: a device shows "lukittu" only once it reports locked, not

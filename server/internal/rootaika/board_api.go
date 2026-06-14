@@ -48,6 +48,29 @@ func (a *App) handleBoardButton(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleBoardUnlock unconditionally releases the lock on all registered devices.
+// Unlike handleBoardButton it never locks, so the board can use it as a
+// dedicated release control when the current lock state is unknown.
+func (a *App) handleBoardUnlock(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if _, ok := a.requireRole(w, r, RoleAdmin, RoleClient); !ok {
+		return
+	}
+
+	affected, err := a.store.UnlockAllLocks(r.Context(), a.now())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "unlock failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"locked":   false,
+		"affected": affected,
+	})
+}
+
 func (a *App) handleBoardToday(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
