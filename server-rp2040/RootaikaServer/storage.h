@@ -29,6 +29,9 @@ struct Settings {
   char desiredVersion[24] = "";      // release tag, e.g. v1.2.0
   char artifactName[64]   = "";      // asset name, e.g. rootaika.exe
   char sha256[72]         = "";      // hex SHA256 of the asset (64 chars)
+  // Message shown on every client's lock screen when all devices are locked at
+  // once (admin "Lock all" button + physical button). Admin-editable, persisted.
+  char lockAllMessage[64] = "Nappi painettu";
 };
 
 struct Device {
@@ -182,6 +185,8 @@ static void loadSettings() {
     strncpy(g_settings.desiredVersion, doc["desiredVersion"] | "", sizeof(g_settings.desiredVersion) - 1);
     strncpy(g_settings.artifactName,   doc["artifactName"]   | "", sizeof(g_settings.artifactName) - 1);
     strncpy(g_settings.sha256,         doc["sha256"]         | "", sizeof(g_settings.sha256) - 1);
+    if (!doc["lockAllMessage"].isNull())
+      strncpy(g_settings.lockAllMessage, doc["lockAllMessage"] | "", sizeof(g_settings.lockAllMessage) - 1);
   }
   f.close();
 }
@@ -275,6 +280,7 @@ static void saveSettings() {
   f.print(F(",\"desiredVersion\":\"")); jsonEscape(f, g_settings.desiredVersion);
   f.print(F("\",\"artifactName\":\"")); jsonEscape(f, g_settings.artifactName);
   f.print(F("\",\"sha256\":\""));       jsonEscape(f, g_settings.sha256);
+  f.print(F("\",\"lockAllMessage\":\"")); jsonEscape(f, g_settings.lockAllMessage);
   f.print(F("\"}"));
   f.close();
 }
@@ -463,6 +469,16 @@ static void setGlobalDesiredVersion(const char* version, const char* artifact, c
   strncpy(g_settings.desiredVersion, version,  sizeof(g_settings.desiredVersion) - 1); g_settings.desiredVersion[sizeof(g_settings.desiredVersion) - 1] = 0;
   strncpy(g_settings.artifactName,   artifact, sizeof(g_settings.artifactName) - 1);   g_settings.artifactName[sizeof(g_settings.artifactName) - 1] = 0;
   strncpy(g_settings.sha256,         sha,      sizeof(g_settings.sha256) - 1);         g_settings.sha256[sizeof(g_settings.sha256) - 1] = 0;
+  saveSettings();
+}
+
+// setLockAllMessage stores the message shown on every client's lock screen when
+// all devices are locked together (admin "Lock all" + physical button). An empty
+// value is ignored so the previous message is kept.
+static void setLockAllMessage(const char* msg) {
+  if (!msg[0]) return;
+  strncpy(g_settings.lockAllMessage, msg, sizeof(g_settings.lockAllMessage) - 1);
+  g_settings.lockAllMessage[sizeof(g_settings.lockAllMessage) - 1] = 0;
   saveSettings();
 }
 

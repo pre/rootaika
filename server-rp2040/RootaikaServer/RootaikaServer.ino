@@ -57,8 +57,6 @@ uint32_t pressStartMs = 0;
 bool     longFired    = false;
 const uint32_t LONG_PRESS_MS = 1000;
 
-const char* g_buttonMessage = "Nappi painettu";
-
 // ---- RGB NeoPixel: breathing, red=locked / green=open ----
 Adafruit_NeoPixel pixel(1, NEOPIXEL, NEO_GRB + NEO_KHZ800);
 uint8_t  ledR = 0, ledG = 0, ledB = 0;
@@ -366,7 +364,7 @@ void handleLockStatus(WiFiClient& c) {
 
 void handleLockToggle(WiFiClient& c) {
   int affected = 0;
-  bool locked = toggleAllLocks(g_buttonMessage, &affected);
+  bool locked = toggleAllLocks(g_settings.lockAllMessage, &affected);
   applyLockLed();
   sendJsonHead(c, 200);
   c.print(F("{\"locked\":")); c.print(locked ? F("true") : F("false"));
@@ -411,6 +409,25 @@ void adminSettings(WiFiClient& c, const char* body) {
   setGlobalDesiredVersion(ver, artifact, sha);
 
   sendRedirect(c, "/settings#settings");
+}
+
+// adminLockAll saves the lock-all message (when provided) and locks every
+// assigned device with it. Mirrors the physical button's short press, but the
+// message is admin-supplied instead of the stored default.
+void adminLockAll(WiFiClient& c, const char* body) {
+  char msg[64]; formField(body, "message", msg, sizeof(msg));
+  setLockAllMessage(msg);
+  lockAllAssigned(g_settings.lockAllMessage);
+  applyLockLed();
+  sendRedirect(c, "/settings#lockall");
+}
+
+// adminUnlockAll releases every assigned device (settings-page counterpart to the
+// physical button's long press).
+void adminUnlockAll(WiFiClient& c) {
+  unlockAllLocks();
+  applyLockLed();
+  sendRedirect(c, "/settings#lockall");
 }
 
 void adminCreateUser(WiFiClient& c, const char* body) {
@@ -619,6 +636,8 @@ void routeAdmin(WiFiClient& c, const char* path, const char* body) {
   }
 
   if (!strcmp(seg0, "settings") && seg2[0] == 0)                         { adminSettings(c, body); return; }
+  if (!strcmp(seg0, "lock-all") && id == 0)                              { adminLockAll(c, body); return; }
+  if (!strcmp(seg0, "unlock-all") && id == 0)                            { adminUnlockAll(c); return; }
   if (!strcmp(seg0, "users") && id == 0)                                 { adminCreateUser(c, body); return; }
   if (!strcmp(seg0, "users") && id > 0 && !strcmp(seg2, "rename"))       { adminRenameUser(c, id, body); return; }
   if (!strcmp(seg0, "devices") && id > 0 && !strcmp(seg2, "assign"))     { adminAssignDevice(c, id, body); return; }
@@ -818,7 +837,7 @@ void loop() {
     applyLockLed();
     longFired = true;
   } else if (!buttonPressed && prevPressed) {
-    if (!longFired) { lockAllAssigned(g_buttonMessage); applyLockLed(); }
+    if (!longFired) { lockAllAssigned(g_settings.lockAllMessage); applyLockLed(); }
   }
   prevPressed = buttonPressed;
 

@@ -75,6 +75,33 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
   if (readOnly)
     c.print(F("<div class=notice>Client-tunnuksella n\xC3\xA4kym\xC3\xA4 on read-only. Muutokset vaativat admin-tunnuksen.</div>"));
 
+  // ---- lock all ----
+  // Locks every assigned device at once with an admin-set message. The message is
+  // persisted (g_settings.lockAllMessage) and reused by the physical button too.
+  c.print(F("<section id=lockall><h2>Lukitse kaikki</h2>"));
+  {
+    bool locked; int lc, tc;
+    globalLockState(&locked, &lc, &tc);
+    c.print(F("<p class=muted>Tila: "));
+    c.print(locked ? F("lukittu") : F("auki"));
+    c.print(F(" (")); c.print(lc); c.print('/'); c.print(tc);
+    c.print(F(" laitetta).</p>"));
+  }
+  if (readOnly) {
+    c.print(F("<p class=muted>Viesti lukitusruudulle: <code>"));
+    htmlEscape(c, g_settings.lockAllMessage);
+    c.print(F("</code></p>"));
+  } else {
+    c.print(F("<form method=post action='/admin/lock-all' class=inline>"
+              "<input name=message value='"));
+    htmlEscape(c, g_settings.lockAllMessage);
+    c.print(F("' placeholder='Viesti lukitusruudulle' aria-label='Lukitusviesti' style='min-width:260px'>"
+              "<button class=warn type=submit>Lukitse kaikki</button></form>"
+              "<form method=post action='/admin/unlock-all' class=inline>"
+              "<button class=secondary type=submit>Avaa kaikki</button></form>"));
+  }
+  c.print(F("</section>"));
+
   // ---- devices ----
   c.print(F("<section id=devices><h2>Laitteet</h2><table><thead><tr>"
             "<th>ID</th><th>Nimi</th><th>UUID</th><th>K\xC3\xA4ytt\xC3\xA4j\xC3\xA4</th><th>Tila</th><th>Viimeksi</th><th>Versio</th><th>Admin</th>"
