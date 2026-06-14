@@ -541,17 +541,34 @@ void handleWarningSoundUpload(WiFiClient& c, const char* contentType, long conte
   long remaining = contentLength;
   uint32_t t0 = millis();
 
-  // Phase 1: skip part headers, i.e. read up to and including "\r\n\r\n".
+  // Phase 1: read part headers up to and including "\r\n\r\n", buffering them so
+  // the Content-Disposition filename can be parsed out.
   int hdrMatch = 0;
   const char* hdrSeq = "\r\n\r\n";
   bool headersDone = false;
+  char hdrs[256];
+  int hdrLen = 0;
   while (remaining > 0 && millis() - t0 < 15000) {
     if (!c.available()) { updateButton(); continue; }
     char ch = c.read(); remaining--;
+    if (hdrLen < (int)sizeof(hdrs) - 1) hdrs[hdrLen++] = ch;
     if (ch == hdrSeq[hdrMatch]) { hdrMatch++; if (hdrMatch == 4) { headersDone = true; break; } }
     else hdrMatch = (ch == '\r') ? 1 : 0;
   }
   if (!headersDone) { out.close(); LittleFS.remove("/warning.mp3.tmp"); sendApiError(c, 400, "malformed multipart"); return; }
+  hdrs[hdrLen] = 0;
+
+  // Extract the upload's original filename from filename="..." (best-effort; an
+  // absent or unparseable name falls back to the on-disk "warning.mp3").
+  char fileName[64] = "warning.mp3";
+  const char* fn = strstr(hdrs, "filename=\"");
+  if (fn) {
+    fn += 10;
+    int i = 0;
+    while (*fn && *fn != '"' && i < (int)sizeof(fileName) - 1) fileName[i++] = *fn++;
+    fileName[i] = 0;
+    if (i == 0) strcpy(fileName, "warning.mp3");
+  }
 
   // Phase 2: stream the file body, watching for the closing delimiter.
   char window[96];
@@ -585,7 +602,7 @@ void handleWarningSoundUpload(WiFiClient& c, const char* contentType, long conte
   }
   LittleFS.remove("/warning.mp3");
   LittleFS.rename("/warning.mp3.tmp", "/warning.mp3");
-  bumpSoundVersion();
+  recordSoundUpload(fileName, written);
   sendRedirect(c, "/settings#settings");
 }
 

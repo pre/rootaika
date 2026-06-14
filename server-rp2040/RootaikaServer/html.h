@@ -31,6 +31,14 @@ static const char* lockStateText(const Device& d) {
   return "lukitaan\xE2\x80\xA6";  // "lukitaan…"
 }
 
+// formatBytes renders a byte count as a human-readable "kB"/"MB" string (decimal
+// units, one decimal place; bytes shown raw under 1 kB).
+static void formatBytes(char* out, int outsz, long bytes) {
+  if (bytes >= 1000000L)      snprintf(out, outsz, "%.1f MB", bytes / 1000000.0);
+  else if (bytes >= 1000L)    snprintf(out, outsz, "%.1f kB", bytes / 1000.0);
+  else                        snprintf(out, outsz, "%ld B", bytes);
+}
+
 // versionOptionLabel writes a registered version as "tag (artifact)", or just
 // "tag" when no artifact is set.
 static void versionOptionLabel(WiFiClient& c, const VersionRecord& v) {
@@ -260,8 +268,16 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
   c.print(F("<h3>Lukitusvaroituksen \xC3\xA4\xC3\xA4ni (MP3)</h3>"));
   char sv[16]; soundVersionStr(sv, sizeof(sv));
   if (sv[0]) {
-    c.print(F("<p class=muted>\xC3\x84\xC3\xA4ni asetettu (versio ")); c.print(sv);
-    c.print(F("). Client soittaa t\xC3\xA4m\xC3\xA4n varoituksen aikana.</p>"));
+    // Show the uploaded filename and size (plus upload time) instead of a bare
+    // version counter.
+    c.print(F("<p class=muted>Tiedosto: <code>"));
+    htmlEscape(c, g_settings.soundName[0] ? g_settings.soundName : "warning.mp3");
+    c.print(F("</code> ("));
+    char sz[24]; formatBytes(sz, sizeof(sz), g_settings.soundSize);
+    c.print(sz);
+    c.print(F(")"));
+    if (g_settings.soundAt[0]) { c.print(F(", ladattu ")); htmlEscape(c, g_settings.soundAt); }
+    c.print(F(". Client soittaa t\xC3\xA4m\xC3\xA4n varoituksen aikana.</p>"));
   } else {
     c.print(F("<p class=muted>Ei \xC3\xA4\xC3\xA4nt\xC3\xA4 asetettu. Varoitus n\xC3\xA4kyy ruudulla mutta \xC3\xA4\xC3\xA4nt\xC3\xA4 ei soiteta.</p>"));
   }

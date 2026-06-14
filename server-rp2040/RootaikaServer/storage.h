@@ -23,6 +23,10 @@ struct Settings {
   int  idle = 60, upload = 60, poll = 30, maxGap = 300, chartYMax = 720, boardRefresh = 60;
   bool debug = false, debugUnassigned = false;
   int  soundVer = 0;                 // bumped on every MP3 upload; 0 = none uploaded
+  // Metadata of the last warning-sound upload, shown on the Settings page.
+  char soundName[64] = "";           // original filename the MP3 was uploaded with
+  char soundAt[24]   = "";           // NTP UTC time of the upload ("" if clock unsynced)
+  long soundSize     = 0;            // stored MP3 size in bytes (0 = none)
   int  nextDeviceId = 1, nextUserId = 1, nextCategoryId = 1, nextVersionId = 1;
   // OTA auto-update: the GLOBAL default version SELECTION. Version records (the
   // tag/artifact/sha256 triple) live in the separate g_versions registry; this is
@@ -194,6 +198,9 @@ static void loadSettings() {
     g_settings.debug           = doc["debug"]           | g_settings.debug;
     g_settings.debugUnassigned = doc["debugUnassigned"] | g_settings.debugUnassigned;
     g_settings.soundVer        = doc["soundVer"]        | g_settings.soundVer;
+    g_settings.soundSize       = doc["soundSize"]       | g_settings.soundSize;
+    strncpy(g_settings.soundName, doc["soundName"] | "", sizeof(g_settings.soundName) - 1);
+    strncpy(g_settings.soundAt,   doc["soundAt"]   | "", sizeof(g_settings.soundAt) - 1);
     g_settings.nextDeviceId    = doc["nextDeviceId"]    | g_settings.nextDeviceId;
     g_settings.nextUserId      = doc["nextUserId"]      | g_settings.nextUserId;
     g_settings.nextCategoryId  = doc["nextCategoryId"]  | g_settings.nextCategoryId;
@@ -306,6 +313,9 @@ static void saveSettings() {
   f.print(F(",\"debug\":"));           f.print(g_settings.debug ? F("true") : F("false"));
   f.print(F(",\"debugUnassigned\":")); f.print(g_settings.debugUnassigned ? F("true") : F("false"));
   f.print(F(",\"soundVer\":"));        f.print(g_settings.soundVer);
+  f.print(F(",\"soundSize\":"));       f.print(g_settings.soundSize);
+  f.print(F(",\"soundName\":\""));     jsonEscape(f, g_settings.soundName); f.print('"');
+  f.print(F(",\"soundAt\":\""));       jsonEscape(f, g_settings.soundAt);   f.print('"');
   f.print(F(",\"nextDeviceId\":"));    f.print(g_settings.nextDeviceId);
   f.print(F(",\"nextUserId\":"));      f.print(g_settings.nextUserId);
   f.print(F(",\"nextCategoryId\":"));  f.print(g_settings.nextCategoryId);
@@ -722,8 +732,14 @@ static void updateSettings(const Settings& s) {
   saveDevices();
 }
 
-static void bumpSoundVersion() {
+// recordSoundUpload bumps the sound version and stores the upload's metadata
+// (original filename, byte size, NTP upload time) shown on the Settings page.
+static void recordSoundUpload(const char* name, long size) {
   g_settings.soundVer++;
+  g_settings.soundSize = size;
+  strncpy(g_settings.soundName, name, sizeof(g_settings.soundName) - 1);
+  g_settings.soundName[sizeof(g_settings.soundName) - 1] = 0;
+  nowUtcString(g_settings.soundAt, sizeof(g_settings.soundAt));
   saveSettings();
 }
 
