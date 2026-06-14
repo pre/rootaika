@@ -20,6 +20,34 @@ type BoardDeviceUsage struct {
 	Minutes int    `json:"minutes"`
 }
 
+// boardButtonMessage is the lock overlay text shown when the physical board
+// button locks all devices.
+const boardButtonMessage = "Nappi painettu"
+
+// handleBoardButton toggles the lock state of all registered devices from a
+// single physical button press on the board. It uses the client role so the Pi
+// can call it with the same client/client credentials it already uses for
+// GET /api/v1/board/today.
+func (a *App) handleBoardButton(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if _, ok := a.requireRole(w, r, RoleAdmin, RoleClient); !ok {
+		return
+	}
+
+	locked, affected, err := a.store.ToggleAllLocks(r.Context(), boardButtonMessage, a.now())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "toggle locks failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"locked":   locked,
+		"affected": affected,
+	})
+}
+
 func (a *App) handleBoardToday(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)

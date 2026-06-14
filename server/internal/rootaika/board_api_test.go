@@ -98,6 +98,94 @@ func TestBoardTodayComputesMinutesAndRefresh(t *testing.T) {
 	}
 }
 
+func TestBoardButtonRequiresAuth(t *testing.T) {
+	app := testApp(t)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/board/button", nil)
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", recorder.Code)
+	}
+}
+
+func TestBoardButtonTogglesAllAssignedDevices(t *testing.T) {
+	app := testApp(t)
+	ctx := context.Background()
+
+	if err := app.store.CreateUser(ctx, "Pekka", app.now()); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	users, err := app.store.Users(ctx)
+	if err != nil {
+		t.Fatalf("users: %v", err)
+	}
+	userID := users[0].ID
+
+	// Two assigned devices the button should lock, plus one unassigned device it
+	// must leave untouched.
+	for _, uuid := range []string{"client-1", "client-2"} {
+		device, err := app.store.EnsureDevice(ctx, uuid, app.now())
+		if err != nil {
+			t.Fatalf("ensure device %s: %v", uuid, err)
+		}
+		if err := app.store.UpdateDevice(ctx, device.ID, device.DisplayName, &userID); err != nil {
+			t.Fatalf("assign device %s: %v", uuid, err)
+		}
+	}
+	if _, err := app.store.EnsureDevice(ctx, "client-unassigned", app.now()); err != nil {
+		t.Fatalf("ensure unassigned device: %v", err)
+	}
+
+	// First press locks all assigned devices with the button message.
+	locked, affected := pressBoardButton(t, app)
+	if !locked || affected != 2 {
+		t.Fatalf("first press: locked=%v affected=%d, want true/2", locked, affected)
+	}
+	assertDeviceLock(t, app, "client-1", true, boardButtonMessage)
+	assertDeviceLock(t, app, "client-2", true, boardButtonMessage)
+	assertDeviceLock(t, app, "client-unassigned", false, "")
+
+	// Second press releases all of them.
+	locked, affected = pressBoardButton(t, app)
+	if locked || affected != 2 {
+		t.Fatalf("second press: locked=%v affected=%d, want false/2", locked, affected)
+	}
+	assertDeviceLock(t, app, "client-1", false, "")
+	assertDeviceLock(t, app, "client-2", false, "")
+}
+
+func pressBoardButton(t *testing.T, app *App) (bool, int) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/board/button", nil)
+	request.SetBasicAuth("client", "client")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("button status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Locked   bool `json:"locked"`
+		Affected int  `json:"affected"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode button response: %v", err)
+	}
+	return response.Locked, response.Affected
+}
+
+func assertDeviceLock(t *testing.T, app *App, clientUUID string, wantLocked bool, wantMessage string) {
+	t.Helper()
+	config, err := app.store.ClientConfig(context.Background(), clientUUID, app.now())
+	if err != nil {
+		t.Fatalf("client config %s: %v", clientUUID, err)
+	}
+	if config.Locked != wantLocked || config.LockMessage != wantMessage {
+		t.Fatalf("%s: locked=%v message=%q, want locked=%v message=%q",
+			clientUUID, config.Locked, config.LockMessage, wantLocked, wantMessage)
+	}
+}
+
 func TestSecondsToWholeMinutesRounds(t *testing.T) {
 	cases := map[int64]int{0: 0, 29: 0, 30: 1, 89: 1, 90: 2, 180: 3}
 	for seconds, want := range cases {

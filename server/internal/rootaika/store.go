@@ -418,6 +418,46 @@ UPDATE device_config SET locked = ?, lock_message = ?, warning_seconds = ? WHERE
 	return nil
 }
 
+// ToggleAllLocks flips the lock state of every registered (assigned) device in a
+// single transaction. If any registered device is currently locked, all are
+// unlocked; otherwise all are locked with the given message and no warning
+// delay. It returns the resulting lock state and the number of devices affected.
+// This backs the physical board button, which has a single push for both lock
+// and release.
+func (s *Store) ToggleAllLocks(ctx context.Context, message string, now time.Time) (bool, int, error) {
+	var locked bool
+	var affected int
+	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var lockedCount int
+		if err := tx.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM device_config c
+JOIN devices d ON d.id = c.device_id
+WHERE d.registration_status = 'assigned' AND c.locked = 1`).Scan(&lockedCount); err != nil {
+			return err
+		}
+
+		locked = lockedCount == 0
+		newMessage := message
+		if !locked {
+			newMessage = ""
+		}
+		result, err := tx.ExecContext(ctx, `
+UPDATE device_config SET locked = ?, lock_message = ?, warning_seconds = 0
+WHERE device_id IN (SELECT id FROM devices WHERE registration_status = 'assigned')`,
+			boolToInt(locked), newMessage)
+		if err != nil {
+			return err
+		}
+		rows, _ := result.RowsAffected()
+		affected = int(rows)
+		return nil
+	})
+	if err != nil {
+		return false, 0, err
+	}
+	return locked, affected, nil
+}
+
 // RecordDeviceStatus stores the state the client reported about itself during a
 // config poll (active/idle/locked). The admin UI uses this as the lock
 // acknowledgement: a device shows "lukittu" only once it reports locked, not
