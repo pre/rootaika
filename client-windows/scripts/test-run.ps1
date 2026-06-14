@@ -47,13 +47,32 @@ if (-not (Test-Path $clientExe)) {
 $leftovers = Get-Process rootaika -ErrorAction SilentlyContinue
 if ($leftovers) {
     Write-Host "Stopping leftover rootaika processes from a previous run..." -ForegroundColor Yellow
-    $leftovers | Stop-Process -Force
+    # A previous run started as admin leaves an elevated process this non-admin
+    # session cannot kill. Stop-Process then fails with "Access is denied", which
+    # otherwise surfaces later as the exe being locked / the port still bound.
+    $stuck = @()
+    foreach ($p in $leftovers) {
+        try {
+            Stop-Process -Id $p.Id -Force -ErrorAction Stop
+        } catch {
+            $stuck += $p
+        }
+    }
+    if ($stuck) {
+        $ids = ($stuck | ForEach-Object { $_.Id }) -join ", "
+        throw "Could not stop elevated rootaika process(es) (PID: $ids). " +
+              "A previous run was started as admin. Stop it from an elevated " +
+              "PowerShell: Stop-Process -Id $ids -Force"
+    }
     Start-Sleep -Milliseconds 500
 }
 
 # An exe cannot be reliably launched from a UNC path, so copy into a local directory.
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 Copy-Item $clientExe $WorkDir -Force
+# Copying from the \\wsl.localhost\ UNC share stamps a network-zone Mark-of-the-Web
+# onto the file, which makes Windows refuse to launch it ("Access is denied").
+Unblock-File (Join-Path $WorkDir "rootaika.exe")
 Write-Host "Binary copied -> $WorkDir" -ForegroundColor Green
 
 # Environment variables: ROOTAIKA_HOME points client.json + the local SQLite buffer
