@@ -45,12 +45,16 @@ swift run RootaikaMac --selftest
 swift run RootaikaMac --test-lock 5
 
 # Run the agent (accessory app, no Dock icon). Optional server override.
-swift run RootaikaMac --server http://192.168.1.10:8080
+swift run RootaikaMac --server http://192.168.68.199:8080
 ```
 
-Environment overrides (applied after defaults, persisted on first load):
+The default server URL is `http://192.168.68.199:8080`, using the direct LAN IP
+until DNS is available. Environment overrides (applied after defaults, persisted
+on first load):
 `ROOTAIKA_SERVER_URL`, `ROOTAIKA_CLIENT_USERNAME`, `ROOTAIKA_CLIENT_PASSWORD`,
 `ROOTAIKA_HOME`.
+An existing config that still has the old loopback default
+`http://127.0.0.1:8080` is migrated to the LAN IP on load.
 
 ## Install
 

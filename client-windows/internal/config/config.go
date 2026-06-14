@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	defaultServerURL              = "http://127.0.0.1:8080"
+	defaultServerURL              = "http://192.168.68.199:8080"
+	legacyLocalServerURL          = "http://127.0.0.1:8080"
 	defaultClientUsername         = "client"
 	defaultAgentListenAddress     = "127.0.0.1:48611"
 	defaultIdleThresholdSeconds   = 60
@@ -206,7 +207,7 @@ func (c *Config) applyDefaults(path string) (bool, error) {
 	} else if _, err := uuid.Parse(c.ClientID); err != nil {
 		return false, fmt.Errorf("invalid client_id %q: %w", c.ClientID, err)
 	}
-	if c.ServerURL == "" {
+	if c.ServerURL == "" || c.ServerURL == legacyLocalServerURL {
 		c.ServerURL = defaultServerURL
 		changed = true
 	}

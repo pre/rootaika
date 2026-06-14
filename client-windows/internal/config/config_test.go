@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -25,6 +27,9 @@ func TestLoadOrCreateFillsPersistentDefaults(t *testing.T) {
 	if cfg.DBPath != filepath.Join(filepath.Dir(path), "rootaika-client.db") {
 		t.Fatalf("unexpected db path: %s", cfg.DBPath)
 	}
+	if cfg.ServerURL != defaultServerURL {
+		t.Fatalf("unexpected server URL: %s", cfg.ServerURL)
+	}
 	if cfg.IdleThresholdSeconds != defaultIdleThresholdSeconds {
 		t.Fatalf("unexpected idle threshold: %d", cfg.IdleThresholdSeconds)
 	}
@@ -38,6 +43,31 @@ func TestLoadOrCreateFillsPersistentDefaults(t *testing.T) {
 	}
 	if reloaded.AgentToken != cfg.AgentToken {
 		t.Fatalf("agent token was not persisted")
+	}
+}
+
+func TestLoadOrCreateMigratesLegacyLocalServerURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client.json")
+	data, err := json.Marshal(Config{
+		ClientID:  uuid.NewString(),
+		ServerURL: legacyLocalServerURL,
+	})
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadOrCreate(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	if cfg.ServerURL != defaultServerURL {
+		t.Fatalf("legacy server URL was not migrated: %s", cfg.ServerURL)
 	}
 }
 

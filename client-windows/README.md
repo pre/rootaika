@@ -17,7 +17,7 @@ The first launch creates the config and a persistent `client_id` UUID. The key f
 
 ```json
 {
-  "server_url": "http://127.0.0.1:8080",
+  "server_url": "http://192.168.68.199:8080",
   "client_username": "client",
   "client_password": "change-me",
   "agent_listen_address": "127.0.0.1:48611"
@@ -32,6 +32,8 @@ The path can be passed to both binaries:
 ```
 
 The environment variables `ROOTAIKA_SERVER_URL`, `ROOTAIKA_CLIENT_USERNAME`, `ROOTAIKA_CLIENT_PASSWORD`, and `ROOTAIKA_AGENT_LISTEN_ADDRESS` override the file values at runtime.
+An existing config that still has the old loopback default
+`http://127.0.0.1:8080` is migrated to the LAN IP on load.
 
 ## Build
 
@@ -64,7 +66,7 @@ The `scripts/` directory contains installation automation. Run everything as adm
 2. Install (open PowerShell as admin):
 
 ```powershell
-.\scripts\install.ps1 -ServerUrl http://192.168.1.10:8080 -ClientPassword change-me
+.\scripts\install.ps1 -ClientPassword change-me
 ```
 
    The script:
@@ -121,7 +123,7 @@ GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o dist/rootaika.exe
 powershell -ExecutionPolicy Bypass -File "\\wsl.localhost\Ubuntu-24.04\home\prepo\dev\oma\rootaika\client-windows\scripts\test-run.ps1"
 ```
 
-By default the script uses the temp directory `%TEMP%\rootaika-test`. Using the same directory on every run means a persistent `client_id`, so the server sees the same device across reruns. Stop with `Ctrl+C`. The server and credential defaults can be changed by editing the variables at the top of the script; `-DistDir` and `-WorkDir` can be passed as parameters if your WSL distro or working directory differs from the default.
+By default the script uses the temp directory `%TEMP%\rootaika-test` and the direct LAN server URL `http://192.168.68.199:8080` until DNS is available. Using the same directory on every run means a persistent `client_id`, so the server sees the same device across reruns. Stop with `Ctrl+C`. The server and credential defaults can be changed by editing the variables at the top of the script; `-DistDir` and `-WorkDir` can be passed as parameters if your WSL distro or working directory differs from the default.
 
 ### Network outages and server restarts
 

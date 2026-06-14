@@ -122,7 +122,7 @@ This cross-compiles `rootaika.exe`, creates the public GitHub release, and print
 ### Install (PowerShell as administrator)
 
 ```powershell
-.\scripts\install.ps1 -ServerUrl http://192.168.1.10:8080 -ClientPassword change-me
+.\scripts\install.ps1 -ClientPassword change-me
 ```
 
 The script:
@@ -146,24 +146,24 @@ The default path is `C:\ProgramData\rootaika\client.json`. The first launch crea
 
 ```json
 {
-  "server_url": "http://127.0.0.1:8080",
+  "server_url": "http://192.168.68.199:8080",
   "client_username": "client",
   "client_password": "change-me",
   "agent_listen_address": "127.0.0.1:48611"
 }
 ```
 
-The environment variables `ROOTAIKA_SERVER_URL`, `ROOTAIKA_CLIENT_USERNAME`, `ROOTAIKA_CLIENT_PASSWORD`, and `ROOTAIKA_AGENT_LISTEN_ADDRESS` override the file values at runtime.
+The default server URL uses the direct LAN IP `http://192.168.68.199:8080` until DNS is available. Existing configs that still contain the old loopback default `http://127.0.0.1:8080` are migrated to the LAN IP on load. The environment variables `ROOTAIKA_SERVER_URL`, `ROOTAIKA_CLIENT_USERNAME`, `ROOTAIKA_CLIENT_PASSWORD`, and `ROOTAIKA_AGENT_LISTEN_ADDRESS` override the file values at runtime.
 
 ### Running in debug mode
 
 Debug mode is read only from the config file's `debug_mode` field (or from the config the server pushes down). There is no command-line flag or environment variable for it. Each subcommand accepts only `-config`. When built with `-H=windowsgui`, `debug_mode: true` opens a console window at runtime.
 
-To run against a specific server (for example `192.168.68.126:8080`) without touching the installed `C:\ProgramData\rootaika\client.json`, create a separate config such as `debug.json`:
+To run against a specific server without touching the installed `C:\ProgramData\rootaika\client.json`, create a separate config such as `debug.json`:
 
 ```json
 {
-  "server_url": "http://192.168.68.126:8080",
+  "server_url": "http://192.168.68.199:8080",
   "client_username": "client",
   "client_password": "change-me",
   "agent_listen_address": "127.0.0.1:48611",
@@ -190,7 +190,7 @@ For more detail, see [`client-windows/README.md`](client-windows/README.md) and 
 
 1. Start the server (Docker or binary) and set strong `ROOTAIKA_ADMIN_PASSWORD` and `ROOTAIKA_CLIENT_PASSWORD` values.
 2. Build the client (`rootaika.exe`) with the `scripts\build.ps1` script.
-3. Install the client on each Windows machine with `scripts\install.ps1`, providing the server URL and client password.
+3. Install the client on each Windows machine with `scripts\install.ps1`, providing the client password and overriding `-ServerUrl` only if needed.
 4. Manage machines, reports, and locks from the admin UI at `http://<server>:8080/`.
 
 ## Server API

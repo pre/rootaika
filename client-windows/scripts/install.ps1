@@ -11,7 +11,7 @@
   later OTA update only needs to swap that file. Run from an elevated PowerShell
   prompt.
 .PARAMETER ServerUrl
-  Base URL of the rootaika server, e.g. http://192.168.1.10:8080
+  Base URL of the rootaika server. Defaults to the direct LAN IP until DNS is in use.
 .PARAMETER ClientPassword
   Shared client Basic Auth password configured on the server.
 .PARAMETER ClientUsername
@@ -20,11 +20,11 @@
   Directory containing rootaika.exe. Defaults to ..\dist relative to this script
   (see build.ps1).
 .EXAMPLE
-  .\install.ps1 -ServerUrl http://192.168.1.10:8080 -ClientPassword s3cret
+  .\install.ps1 -ClientPassword s3cret
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$ServerUrl,
+    [string]$ServerUrl = "http://192.168.68.199:8080",
     [Parameter(Mandatory = $true)][string]$ClientPassword,
     [string]$ClientUsername = "client",
     [string]$SourceDir = (Join-Path $PSScriptRoot "..\dist")

@@ -5,6 +5,9 @@ import Foundation
 /// Mirrors the Windows config.Config schema/defaults; generates and persists
 /// client_id once on first run. Env overrides are applied after defaults.
 struct Config: Codable, Equatable {
+    static let defaultServerURL = "http://192.168.68.199:8080"
+    static let legacyLocalServerURL = "http://127.0.0.1:8080"
+
     var serverURL: String
     var clientUser: String
     var clientPassword: String
@@ -46,7 +49,7 @@ struct Config: Codable, Equatable {
 
     static func makeDefault() -> Config {
         Config(
-            serverURL: "http://127.0.0.1:8080",
+            serverURL: defaultServerURL,
             clientUser: "client",
             clientPassword: "client",
             clientID: UUID().uuidString,
@@ -99,6 +102,10 @@ struct Config: Codable, Equatable {
             if (try? dec.decode(Config.self, from: data)) == nil { changed = true }
             if UUID(uuidString: config.clientID) == nil {
                 config.clientID = UUID().uuidString
+                changed = true
+            }
+            if config.serverURL == Config.legacyLocalServerURL {
+                config.serverURL = Config.defaultServerURL
                 changed = true
             }
         } else {
