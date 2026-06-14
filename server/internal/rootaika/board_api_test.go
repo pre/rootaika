@@ -146,6 +146,14 @@ func TestBoardButtonTogglesAllAssignedDevices(t *testing.T) {
 	assertDeviceLock(t, app, "client-2", true, boardButtonMessage)
 	assertDeviceLock(t, app, "client-unassigned", false, "")
 
+	// The button locks with a warning countdown so clients play the warning sound
+	// before the screen locks, rather than locking instantly.
+	if config, err := app.store.ClientConfig(ctx, "client-1", app.now()); err != nil {
+		t.Fatalf("client config: %v", err)
+	} else if config.WarningSeconds != boardButtonWarningSeconds {
+		t.Fatalf("warning_seconds = %d, want %d", config.WarningSeconds, boardButtonWarningSeconds)
+	}
+
 	// Second press releases all of them.
 	locked, affected = pressBoardButton(t, app)
 	if locked || affected != 2 {

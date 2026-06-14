@@ -469,11 +469,12 @@ VALUES (?, ?, ?, ?, ?, ?)`,
 
 // ToggleAllLocks flips the lock state of every registered (assigned) device in a
 // single transaction. If any registered device is currently locked, all are
-// unlocked; otherwise all are locked with the given message and no warning
-// delay. It returns the resulting lock state and the number of devices affected.
-// This backs the physical board button, which has a single push for both lock
-// and release.
-func (s *Store) ToggleAllLocks(ctx context.Context, message string, now time.Time) (bool, int, error) {
+// unlocked; otherwise all are locked with the given message and warningSeconds
+// countdown, so clients play the warning sound and show a click-through overlay
+// before the screen locks. It returns the resulting lock state and the number of
+// devices affected. This backs the physical board button, which has a single push
+// for both lock and release.
+func (s *Store) ToggleAllLocks(ctx context.Context, message string, warningSeconds int, now time.Time) (bool, int, error) {
 	var locked bool
 	var affected int
 	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -487,13 +488,15 @@ WHERE d.registration_status = 'assigned' AND c.locked = 1`).Scan(&lockedCount); 
 
 		locked = lockedCount == 0
 		newMessage := message
+		newWarning := warningSeconds
 		if !locked {
 			newMessage = ""
+			newWarning = 0
 		}
 		result, err := tx.ExecContext(ctx, `
-UPDATE device_config SET locked = ?, lock_message = ?, warning_seconds = 0
+UPDATE device_config SET locked = ?, lock_message = ?, warning_seconds = ?
 WHERE device_id IN (SELECT id FROM devices WHERE registration_status = 'assigned')`,
-			boolToInt(locked), newMessage)
+			boolToInt(locked), newMessage, newWarning)
 		if err != nil {
 			return err
 		}

@@ -326,6 +326,52 @@ func TestSetDeviceLockUnlockClearsMessage(t *testing.T) {
 	}
 }
 
+func TestToggleAllLocksAppliesWarningOnLockAndClearsOnUnlock(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if err := store.CreateUser(ctx, "Liisa", fixedNow()); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	users, _ := store.Users(ctx)
+	if err := store.UpdateDevice(ctx, device.ID, "Pelikone", &users[0].ID); err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+
+	locked, affected, err := store.ToggleAllLocks(ctx, "Nappi painettu", 60, fixedNow())
+	if err != nil {
+		t.Fatalf("toggle lock: %v", err)
+	}
+	if !locked || affected != 1 {
+		t.Fatalf("toggle lock = (locked=%t, affected=%d), want (true, 1)", locked, affected)
+	}
+	config, err := store.ClientConfig(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	if !config.Locked || config.LockMessage != "Nappi painettu" || config.WarningSeconds != 60 {
+		t.Fatalf("config = %+v, want locked with message and 60s warning", config)
+	}
+
+	locked, _, err = store.ToggleAllLocks(ctx, "Nappi painettu", 60, fixedNow().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("toggle unlock: %v", err)
+	}
+	if locked {
+		t.Fatalf("second toggle locked = true, want false (unlock)")
+	}
+	config, err = store.ClientConfig(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	if config.Locked || config.LockMessage != "" || config.WarningSeconds != 0 {
+		t.Fatalf("config = %+v, want unlocked with empty message and no warning", config)
+	}
+}
+
 func TestSetDeviceLockUnknownDevice(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()

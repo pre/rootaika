@@ -24,6 +24,12 @@ type BoardDeviceUsage struct {
 // button locks all devices.
 const boardButtonMessage = "Nappi painettu"
 
+// boardButtonWarningSeconds is the lock-warning countdown applied when the
+// physical board button locks all devices: clients play the warning sound and
+// show a click-through overlay for this long before the screen actually locks.
+// Matches the per-device admin lock form default.
+const boardButtonWarningSeconds = 60
+
 // handleBoardButton toggles the lock state of all registered devices from a
 // single physical button press on the board. It uses the client role so the Pi
 // can call it with the same client/client credentials it already uses for
@@ -37,7 +43,7 @@ func (a *App) handleBoardButton(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	locked, affected, err := a.store.ToggleAllLocks(r.Context(), boardButtonMessage, a.now())
+	locked, affected, err := a.store.ToggleAllLocks(r.Context(), boardButtonMessage, boardButtonWarningSeconds, a.now())
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "toggle locks failed")
 		return
