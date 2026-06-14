@@ -31,6 +31,27 @@ static const char* lockStateText(const Device& d) {
   return "lukitaan\xE2\x80\xA6";  // "lukitaan…"
 }
 
+// versionOptionLabel writes a registered version as "tag (artifact)", or just
+// "tag" when no artifact is set.
+static void versionOptionLabel(WiFiClient& c, const VersionRecord& v) {
+  htmlEscape(c, v.version);
+  if (v.artifact[0]) { c.print(F(" (")); htmlEscape(c, v.artifact); c.print(F(")")); }
+}
+
+// renderVersionSelect emits a <select name=...> over the registry. selectedId is
+// pre-selected; inheritLabel (non-null) adds a leading 0-value option used by the
+// per-device dropdown ("inherit global"); the global dropdown passes "Ei versiota".
+static void renderVersionSelect(WiFiClient& c, const char* name, int selectedId, const __FlashStringHelper* zeroLabel) {
+  c.print(F("<select name=")); c.print(name); c.print(F(" aria-label='Versio'>"));
+  c.print(F("<option value=0")); if (selectedId == 0) c.print(F(" selected")); c.print(F(">")); c.print(zeroLabel); c.print(F("</option>"));
+  for (int i = 0; i < g_versionCount; i++) {
+    c.print(F("<option value=")); c.print(g_versions[i].id);
+    if (g_versions[i].id == selectedId) c.print(F(" selected"));
+    c.print(F(">")); versionOptionLabel(c, g_versions[i]); c.print(F("</option>"));
+  }
+  c.print(F("</select>"));
+}
+
 static void sendSettingsHead(WiFiClient& c) {
   c.print(F("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n"));
   c.print(F(
@@ -127,8 +148,15 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
     } else {
       c.print(F("<span class=muted>-</span>"));
     }
-    if (d.desiredVersion[0]) {
-      c.print(F("<br><span class=muted>\xE2\x86\x92 ")); htmlEscape(c, d.desiredVersion); c.print(F("</span>"));
+    // target version the device resolves to (per-device selection or global),
+    // shown as "→ tag", with "(laite)" when it is a per-device override.
+    {
+      VersionRecord* tgt = versionById(effectiveVersionId(d));
+      if (tgt) {
+        c.print(F("<br><span class=muted>\xE2\x86\x92 ")); htmlEscape(c, tgt->version);
+        if (d.selectedVersionId > 0) c.print(F(" (laite)"));
+        c.print(F("</span>"));
+      }
     }
     c.print(F("</td><td class=actions>"));
     if (readOnly) {
@@ -155,16 +183,11 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
       c.print(F("/unlock'><button type=submit>Unlock</button></form>"));
       c.print(F("<form method=post action='/admin/devices/")); c.print(d.id);
       c.print(F("/delete'><button class=secondary type=submit onclick=\"return confirm('Poistetaanko laite ja sen tapahtumat pysyv\xC3\xA4sti?')\">Poista</button></form>"));
-      // per-device OTA version override (empty version = inherit global triple)
+      // per-device OTA version selection (0 = inherit the global selection)
       c.print(F("<form method=post action='/admin/devices/")); c.print(d.id);
-      c.print(F("/version' class=stack>"
-                "<input name=desired_version value='")); htmlEscape(c, d.desiredVersion);
-      c.print(F("' placeholder='versio (tyhj\xC3\xA4=globaali)' aria-label='Haluttu versio'>"
-                "<input name=desired_artifact_name value='")); htmlEscape(c, d.desiredArtifact);
-      c.print(F("' placeholder='artifakti' aria-label='Artifaktin nimi'>"
-                "<input name=desired_sha256 value='")); htmlEscape(c, d.desiredSha256);
-      c.print(F("' placeholder='sha256' aria-label='SHA256'>"
-                "<button class=secondary type=submit>Aseta versio</button></form>"));
+      c.print(F("/version' class=stack>"));
+      renderVersionSelect(c, "selected_version_id", d.selectedVersionId, F("Globaali oletus"));
+      c.print(F("<button class=secondary type=submit>Aseta versio</button></form>"));
     }
     c.print(F("</td></tr>"));
   }
@@ -217,19 +240,19 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
   if (g_settings.debugUnassigned) c.print(F(" checked"));
   if (readOnly) c.print(F(" disabled"));
   c.print(F("> Debug-tila rekister\xC3\xB6im\xC3\xA4tt\xC3\xB6mille</label>"));
-  // global OTA desired-version triple (client auto-update). Per-device overrides
-  // live in the devices table above. Empty version = no update wanted.
-  auto textField = [&](const __FlashStringHelper* label, const char* name, const char* value, const __FlashStringHelper* placeholder) {
-    c.print(F("<label class=stack>")); c.print(label);
-    c.print(F("<input name=")); c.print(name);
-    c.print(F(" value='")); htmlEscape(c, value);
-    c.print(F("' placeholder='")); c.print(placeholder); c.print(F("'"));
-    if (readOnly) c.print(F(" disabled"));
-    c.print(F("></label>"));
-  };
-  textField(F("Haluttu client-versio"), "desired_client_version", g_settings.desiredVersion, F("v1.2.0"));
-  textField(F("Artifaktin nimi"),       "client_artifact_name",   g_settings.artifactName,   F("rootaika.exe"));
-  textField(F("SHA256"),                "client_sha256",          g_settings.sha256,         F("64 heksamerkki\xC3\xA4"));
+  // global OTA version selection (client auto-update). Versions are registered in
+  // the Versiot section below; per-device overrides live in the devices table.
+  // "Ei versiota" = no update wanted.
+  c.print(F("<label class=stack>Haluttu client-versio (globaali)"));
+  if (readOnly) {
+    VersionRecord* gv = versionById(g_settings.selectedVersionId);
+    c.print(F("<input value='"));
+    if (gv) versionOptionLabel(c, *gv); else c.print(F("Ei versiota"));
+    c.print(F("' disabled>"));
+  } else {
+    renderVersionSelect(c, "selected_version_id", g_settings.selectedVersionId, F("Ei versiota"));
+  }
+  c.print(F("</label>"));
   if (!readOnly) c.print(F("<div><button type=submit>Tallenna asetukset</button></div>"));
   c.print(F("</form>"));
 
@@ -246,6 +269,47 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
     c.print(F("<form method=post action='/admin/settings/warning-sound' enctype=multipart/form-data class=inline>"
               "<input name=sound type=file accept='audio/mpeg,.mp3' required aria-label='MP3-tiedosto'>"
               "<button type=submit>Lataa \xC3\xA4\xC3\xA4ni</button></form>"));
+  c.print(F("</section>"));
+
+  // ---- versions (OTA registry) ----
+  // The selectable client releases: each is the (tag, artifact, sha256) triple
+  // entered once here, then chosen from the global/per-device dropdowns above.
+  c.print(F("<section id=versions><h2>Versiot</h2>"
+            "<p class=muted>Rekister\xC3\xB6idyt client-versiot. Valitse k\xC3\xA4ytt\xC3\xB6\xC3\xB6n otettava versio Asetukset-osiossa (globaali) tai laitekohtaisesti.</p>"
+            "<table class=compact><thead><tr>"
+            "<th>Versio</th><th>Artifakti</th><th>SHA256</th><th></th></tr></thead><tbody>"));
+  if (g_versionCount == 0) c.print(F("<tr><td colspan=4 class=muted>Ei rekister\xC3\xB6ityj\xC3\xA4 versioita.</td></tr>"));
+  for (int i = 0; i < g_versionCount; i++) {
+    VersionRecord& v = g_versions[i];
+    if (readOnly) {
+      c.print(F("<tr><td><code>")); htmlEscape(c, v.version);
+      c.print(F("</code></td><td>")); htmlEscape(c, v.artifact);
+      c.print(F("</td><td><code>")); htmlEscape(c, v.sha256);
+      c.print(F("</code></td><td></td></tr>"));
+    } else {
+      // editable in place: one row-spanning form keyed by version id
+      c.print(F("<tr><td colspan=4><form method=post action='/admin/versions/")); c.print(v.id);
+      c.print(F("/edit' class=inline>"
+                "<input name=version value='")); htmlEscape(c, v.version);
+      c.print(F("' placeholder='v1.2.0' required aria-label='Versio' style='min-width:110px'>"
+                "<input name=artifact value='")); htmlEscape(c, v.artifact);
+      c.print(F("' placeholder='rootaika.exe' aria-label='Artifakti' style='min-width:150px'>"
+                "<input name=sha256 value='")); htmlEscape(c, v.sha256);
+      c.print(F("' placeholder='sha256' aria-label='SHA256' style='min-width:260px'>"
+                "<button class=secondary type=submit>Tallenna</button></form>"
+                "<form method=post action='/admin/versions/")); c.print(v.id);
+      c.print(F("/delete' style='display:inline'><button class=secondary type=submit "
+                "onclick=\"return confirm('Poistetaanko versio? Valinnat palautuvat oletukseen.')\">Poista</button></form>"
+                "</td></tr>"));
+    }
+  }
+  c.print(F("</tbody></table>"));
+  if (!readOnly)
+    c.print(F("<form method=post action='/admin/versions' class=inline>"
+              "<input name=version placeholder='v1.2.0' required aria-label='Versio'>"
+              "<input name=artifact placeholder='rootaika.exe' aria-label='Artifakti'>"
+              "<input name=sha256 placeholder='64 heksamerkki\xC3\xA4' aria-label='SHA256' style='min-width:260px'>"
+              "<button type=submit>Lis\xC3\xA4\xC3\xA4 versio</button></form>"));
   c.print(F("</section>"));
 
   // ---- categories ----

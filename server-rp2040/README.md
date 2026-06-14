@@ -28,9 +28,9 @@ now mirrors the Go server's full client API plus the admin Settings page:
 | `GET  /` | client/admin | Live dashboard (per-device today minutes, lock state, 10s refresh) |
 
 Server state (settings, users, devices with per-device config/lock/status,
-categories) lives in RAM and is mirrored to small JSON files on LittleFS
-(`settings.json`, `users.json`, `devices.json`, `categories.json`), so it
-survives reboots. Lock is **per device** and acts only on *assigned* devices,
+categories, OTA version registry) lives in RAM and is mirrored to small JSON
+files on LittleFS (`settings.json`, `users.json`, `devices.json`,
+`categories.json`, `versions.json`), so it survives reboots. Lock is **per device** and acts only on *assigned* devices,
 matching the Go server: a device shows `lukittu` only once its client reports
 `state=locked` back, `lukitaan…` until then.
 
@@ -59,19 +59,28 @@ The board is the server half of the Windows client's over-the-air update (see
 anything; it only *declares* the version the client should run and *records*
 what the client reports:
 
-- **Desired version is a triple** `(desired_version, artifact_name, sha256)`.
-  Set it **globally** in the Settings page, or **per device** in the devices
-  table (an empty per-device version inherits the global triple). The download
-  origin (GitHub owner/repo) is fixed in the client binary and is never
-  server-controlled; only the tag, asset name, and hash come from here.
+- **Version management and version selection are separate.** A version is the
+  triple `(version, artifact, sha256)` entered **once** in the Settings page's
+  *Versiot* registry (`versions.json`); the download origin (GitHub owner/repo)
+  is fixed in the client binary and is never server-controlled. Fixing a wrong
+  sha256/artifact is an in-place edit of the record, so every selection pointing
+  at it updates automatically.
+- **Selection chooses a registered version by id**, not by re-typing the triple.
+  Set the **global** default from a dropdown in the Settings section, and an
+  optional **per-device** override from a dropdown in the devices table (the
+  per-device dropdown's "Globaali oletus" inherits the global selection). A
+  device resolves to its own selection if set, otherwise the global one;
+  "Ei versiota" / no selection means no update is offered (clients keep running).
+  Deleting a registered version resets any global/device selection that pointed
+  at it back to none.
 - **Travels on the existing config poll** — no new endpoint. The client sends
   its running version as `GET /api/v1/client/config?...&version=v1.2.0`; the
   board stores it as the device's `lastVersion`/`lastVersionAt` and returns the
-  resolved desired triple in the same JSON response. The client compares and
-  self-swaps; the board's role ends at "declare + record".
+  resolved triple (`desired_version`/`artifact_name`/`sha256`) in the same JSON
+  response, unchanged on the wire. The client compares and self-swaps.
 - **Reported version is shown** in the devices table (`Versio` column) with the
-  time it was last reported and a `→ <ver>` marker when a per-device override is
-  active.
+  time it was last reported and a `→ <tag>` marker for the resolved target
+  (`(laite)` when a per-device override is active).
 
 ### Deliberate deviation: NTP clock
 

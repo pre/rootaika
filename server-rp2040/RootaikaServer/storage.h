@@ -11,6 +11,7 @@
 #define MAX_DEVICES   16
 #define MAX_USERS     16
 #define MAX_CATEGORIES 32
+#define MAX_VERSIONS   16   // registered client versions selectable for OTA update
 #define DEDUP_RING    256   // recent event_ids kept in RAM to drop retried duplicates
 
 // Cap the uploadable warning MP3 (matches the Go server's 10 MB limit), so an
@@ -22,13 +23,11 @@ struct Settings {
   int  idle = 60, upload = 60, poll = 30, maxGap = 300, chartYMax = 720, boardRefresh = 60;
   bool debug = false, debugUnassigned = false;
   int  soundVer = 0;                 // bumped on every MP3 upload; 0 = none uploaded
-  int  nextDeviceId = 1, nextUserId = 1, nextCategoryId = 1;
-  // OTA auto-update: the desired client version triple (global default). The
-  // download origin (GitHub owner/repo) is fixed in the client binary; only the
-  // tag, asset name, and SHA256 are server-controlled. Empty = no update wanted.
-  char desiredVersion[24] = "";      // release tag, e.g. v1.2.0
-  char artifactName[64]   = "";      // asset name, e.g. rootaika.exe
-  char sha256[72]         = "";      // hex SHA256 of the asset (64 chars)
+  int  nextDeviceId = 1, nextUserId = 1, nextCategoryId = 1, nextVersionId = 1;
+  // OTA auto-update: the GLOBAL default version SELECTION. Version records (the
+  // tag/artifact/sha256 triple) live in the separate g_versions registry; this is
+  // just the id of the selected record. 0 = no global version (no update wanted).
+  int  selectedVersionId = 0;
   // Message shown on every client's lock screen when all devices are locked at
   // once (admin "Lock all" button + physical button). Admin-editable, persisted.
   char lockAllMessage[64] = "Nappi painettu";
@@ -45,12 +44,10 @@ struct Device {
   char lastStatus[8] = "";           // active/idle/locked, client-reported
   int  idle = 60, upload = 60, poll = 30;
   char lastSeen[24] = "";            // newest event occurred_at (no RTC on board)
-  // OTA auto-update: per-device override of the desired version triple. All empty
-  // = inherit the global Settings triple. lastVersion is what the client reported
-  // it is running, with the NTP wall-clock time it last reported it.
-  char desiredVersion[24] = "";
-  char desiredArtifact[64] = "";
-  char desiredSha256[72]  = "";
+  // OTA auto-update: per-device SELECTION overriding the global one. Holds the id
+  // of a g_versions record; 0 = inherit the global selection. lastVersion is what
+  // the client reported it is running, with the NTP time it last reported it.
+  int  selectedVersionId = 0;
   char lastVersion[24]    = "";      // client-reported running version
   char lastVersionAt[24]  = "";      // NTP UTC time of that report ("" if clock unsynced)
 };
@@ -67,6 +64,17 @@ struct Category {
   char cat[40] = "";
 };
 
+// VersionRecord is one registered, selectable client release: the OTA triple
+// (tag/artifact/sha256) entered once here, then referenced by id from the global
+// and per-device selections. The download origin (GitHub owner/repo) is fixed in
+// the client binary; only these three fields are server-controlled.
+struct VersionRecord {
+  int  id = 0;
+  char version[24]  = "";            // release tag, e.g. v1.2.0
+  char artifact[64] = "";            // asset name, e.g. rootaika.exe
+  char sha256[72]   = "";            // hex SHA256 of the asset (64 chars)
+};
+
 // ---------- globals ----------
 Settings g_settings;
 Device   g_devices[MAX_DEVICES];
@@ -75,6 +83,8 @@ User     g_users[MAX_USERS];
 int      g_userCount = 0;
 Category g_categories[MAX_CATEGORIES];
 int      g_categoryCount = 0;
+VersionRecord g_versions[MAX_VERSIONS];
+int      g_versionCount = 0;
 
 // recent event_id ring for idempotent re-send (RAM only, resets on reboot)
 char     g_dedup[DEDUP_RING][40];
@@ -148,6 +158,11 @@ static const char* userName(int id) {
   User* u = userById(id);
   return u ? u->name : "";
 }
+static VersionRecord* versionById(int id) {
+  if (id <= 0) return nullptr;
+  for (int i = 0; i < g_versionCount; i++) if (g_versions[i].id == id) return &g_versions[i];
+  return nullptr;
+}
 
 // jsonEscapeTo writes s into a WiFiClient/File-like sink with JSON string escaping
 // for the characters that can appear in admin-entered names/messages.
@@ -182,9 +197,8 @@ static void loadSettings() {
     g_settings.nextDeviceId    = doc["nextDeviceId"]    | g_settings.nextDeviceId;
     g_settings.nextUserId      = doc["nextUserId"]      | g_settings.nextUserId;
     g_settings.nextCategoryId  = doc["nextCategoryId"]  | g_settings.nextCategoryId;
-    strncpy(g_settings.desiredVersion, doc["desiredVersion"] | "", sizeof(g_settings.desiredVersion) - 1);
-    strncpy(g_settings.artifactName,   doc["artifactName"]   | "", sizeof(g_settings.artifactName) - 1);
-    strncpy(g_settings.sha256,         doc["sha256"]         | "", sizeof(g_settings.sha256) - 1);
+    g_settings.nextVersionId   = doc["nextVersionId"]   | g_settings.nextVersionId;
+    g_settings.selectedVersionId = doc["selectedVersionId"] | g_settings.selectedVersionId;
     if (!doc["lockAllMessage"].isNull())
       strncpy(g_settings.lockAllMessage, doc["lockAllMessage"] | "", sizeof(g_settings.lockAllMessage) - 1);
   }
@@ -213,9 +227,7 @@ static void loadDevices() {
       d.upload = o["upload"] | g_settings.upload;
       d.poll   = o["poll"]   | g_settings.poll;
       strncpy(d.lastSeen, o["lastSeen"] | "", sizeof(d.lastSeen) - 1);
-      strncpy(d.desiredVersion,  o["desiredVersion"]  | "", sizeof(d.desiredVersion) - 1);
-      strncpy(d.desiredArtifact, o["desiredArtifact"] | "", sizeof(d.desiredArtifact) - 1);
-      strncpy(d.desiredSha256,   o["desiredSha256"]   | "", sizeof(d.desiredSha256) - 1);
+      d.selectedVersionId = o["selectedVersionId"] | 0;
       strncpy(d.lastVersion,     o["lastVersion"]     | "", sizeof(d.lastVersion) - 1);
       strncpy(d.lastVersionAt,   o["lastVersionAt"]   | "", sizeof(d.lastVersionAt) - 1);
       if (d.id > 0 && d.uuid[0]) g_deviceCount++;
@@ -261,6 +273,26 @@ static void loadCategories() {
   f.close();
 }
 
+static void loadVersions() {
+  g_versionCount = 0;
+  File f = LittleFS.open("/versions.json", "r");
+  if (!f) return;
+  JsonDocument doc;
+  if (deserializeJson(doc, f) == DeserializationError::Ok) {
+    for (JsonObject o : doc.as<JsonArray>()) {
+      if (g_versionCount >= MAX_VERSIONS) break;
+      VersionRecord& v = g_versions[g_versionCount];
+      v = VersionRecord{};
+      v.id = o["id"] | 0;
+      strncpy(v.version,  o["version"]  | "", sizeof(v.version) - 1);
+      strncpy(v.artifact, o["artifact"] | "", sizeof(v.artifact) - 1);
+      strncpy(v.sha256,   o["sha256"]   | "", sizeof(v.sha256) - 1);
+      if (v.id > 0 && v.version[0]) g_versionCount++;
+    }
+  }
+  f.close();
+}
+
 // ---------- persistence: save ----------
 static void saveSettings() {
   File f = LittleFS.open("/settings.json", "w");
@@ -277,10 +309,9 @@ static void saveSettings() {
   f.print(F(",\"nextDeviceId\":"));    f.print(g_settings.nextDeviceId);
   f.print(F(",\"nextUserId\":"));      f.print(g_settings.nextUserId);
   f.print(F(",\"nextCategoryId\":"));  f.print(g_settings.nextCategoryId);
-  f.print(F(",\"desiredVersion\":\"")); jsonEscape(f, g_settings.desiredVersion);
-  f.print(F("\",\"artifactName\":\"")); jsonEscape(f, g_settings.artifactName);
-  f.print(F("\",\"sha256\":\""));       jsonEscape(f, g_settings.sha256);
-  f.print(F("\",\"lockAllMessage\":\"")); jsonEscape(f, g_settings.lockAllMessage);
+  f.print(F(",\"nextVersionId\":"));   f.print(g_settings.nextVersionId);
+  f.print(F(",\"selectedVersionId\":")); f.print(g_settings.selectedVersionId);
+  f.print(F(",\"lockAllMessage\":\"")); jsonEscape(f, g_settings.lockAllMessage);
   f.print(F("\"}"));
   f.close();
 }
@@ -304,10 +335,8 @@ static void saveDevices() {
     f.print(F(",\"upload\":")); f.print(d.upload);
     f.print(F(",\"poll\":")); f.print(d.poll);
     f.print(F(",\"lastSeen\":\"")); jsonEscape(f, d.lastSeen);
-    f.print(F("\",\"desiredVersion\":\"")); jsonEscape(f, d.desiredVersion);
-    f.print(F("\",\"desiredArtifact\":\"")); jsonEscape(f, d.desiredArtifact);
-    f.print(F("\",\"desiredSha256\":\"")); jsonEscape(f, d.desiredSha256);
-    f.print(F("\",\"lastVersion\":\"")); jsonEscape(f, d.lastVersion);
+    f.print(F("\",\"selectedVersionId\":")); f.print(d.selectedVersionId);
+    f.print(F(",\"lastVersion\":\"")); jsonEscape(f, d.lastVersion);
     f.print(F("\",\"lastVersionAt\":\"")); jsonEscape(f, d.lastVersionAt);
     f.print(F("\"}"));
   }
@@ -346,11 +375,29 @@ static void saveCategories() {
   f.close();
 }
 
+static void saveVersions() {
+  File f = LittleFS.open("/versions.json", "w");
+  if (!f) return;
+  f.print('[');
+  for (int i = 0; i < g_versionCount; i++) {
+    VersionRecord& v = g_versions[i];
+    if (i) f.print(',');
+    f.print(F("{\"id\":")); f.print(v.id);
+    f.print(F(",\"version\":\"")); jsonEscape(f, v.version);
+    f.print(F("\",\"artifact\":\"")); jsonEscape(f, v.artifact);
+    f.print(F("\",\"sha256\":\"")); jsonEscape(f, v.sha256);
+    f.print(F("\"}"));
+  }
+  f.print(']');
+  f.close();
+}
+
 static void storageBegin() {
   loadSettings();
   loadUsers();
   loadDevices();
   loadCategories();
+  loadVersions();
 }
 
 // ---------- device lifecycle ----------
@@ -395,15 +442,20 @@ static void recordDeviceVersion(Device* d, const char* version) {
   saveDevices();
 }
 
-// resolveDesiredVersion picks the effective update triple for a device: the
-// per-device override when its desiredVersion is set, otherwise the global one.
-// Mirrors Go's per-device-over-global resolution in Store.ClientConfig.
+// effectiveVersionId returns the version record id a device resolves to: its own
+// selection when set, otherwise the global selection. 0 = none selected.
+static int effectiveVersionId(const Device& d) {
+  return d.selectedVersionId > 0 ? d.selectedVersionId : g_settings.selectedVersionId;
+}
+
+// resolveDesiredVersion looks up the effective version record for a device and
+// returns its triple. When the device/global selection is 0, or points at a
+// record that no longer exists, all three come back empty (= no update wanted),
+// so clients keep working even when the server offers no version.
 static void resolveDesiredVersion(const Device& d, const char** ver, const char** artifact, const char** sha) {
-  if (d.desiredVersion[0]) {
-    *ver = d.desiredVersion; *artifact = d.desiredArtifact; *sha = d.desiredSha256;
-  } else {
-    *ver = g_settings.desiredVersion; *artifact = g_settings.artifactName; *sha = g_settings.sha256;
-  }
+  VersionRecord* v = versionById(effectiveVersionId(d));
+  if (v) { *ver = v->version; *artifact = v->artifact; *sha = v->sha256; }
+  else   { *ver = ""; *artifact = ""; *sha = ""; }
 }
 
 static void updateDeviceLastSeen(Device* d, const char* occurredAt) {
@@ -448,28 +500,72 @@ static bool updateDevice(int id, const char* displayName, int userId) {
   return true;
 }
 
-// setDeviceDesiredVersion sets (or clears) a device's per-device update triple.
-// Empty version clears all three, so the device falls back to the global triple.
-static bool setDeviceDesiredVersion(int id, const char* version, const char* artifact, const char* sha) {
+// setDeviceSelectedVersion points a device at a registered version id, or 0 to
+// inherit the global selection. An unknown id is coerced to 0 (inherit) so the
+// stored selection never dangles.
+static bool setDeviceSelectedVersion(int id, int versionId) {
   Device* d = deviceById(id);
   if (!d) return false;
-  if (version[0]) {
-    strncpy(d->desiredVersion,  version,  sizeof(d->desiredVersion) - 1);  d->desiredVersion[sizeof(d->desiredVersion) - 1] = 0;
-    strncpy(d->desiredArtifact, artifact, sizeof(d->desiredArtifact) - 1); d->desiredArtifact[sizeof(d->desiredArtifact) - 1] = 0;
-    strncpy(d->desiredSha256,   sha,      sizeof(d->desiredSha256) - 1);   d->desiredSha256[sizeof(d->desiredSha256) - 1] = 0;
-  } else {
-    d->desiredVersion[0] = 0; d->desiredArtifact[0] = 0; d->desiredSha256[0] = 0;
-  }
+  d->selectedVersionId = versionById(versionId) ? versionId : 0;
   saveDevices();
   return true;
 }
 
-// setGlobalDesiredVersion applies the global update triple (settings section).
-static void setGlobalDesiredVersion(const char* version, const char* artifact, const char* sha) {
-  strncpy(g_settings.desiredVersion, version,  sizeof(g_settings.desiredVersion) - 1); g_settings.desiredVersion[sizeof(g_settings.desiredVersion) - 1] = 0;
-  strncpy(g_settings.artifactName,   artifact, sizeof(g_settings.artifactName) - 1);   g_settings.artifactName[sizeof(g_settings.artifactName) - 1] = 0;
-  strncpy(g_settings.sha256,         sha,      sizeof(g_settings.sha256) - 1);         g_settings.sha256[sizeof(g_settings.sha256) - 1] = 0;
+// setGlobalSelectedVersion sets the global default version id (0 = none/no
+// update). An unknown id is coerced to 0.
+static void setGlobalSelectedVersion(int versionId) {
+  g_settings.selectedVersionId = versionById(versionId) ? versionId : 0;
   saveSettings();
+}
+
+// createVersion registers a new selectable version triple. Returns the new id, or
+// the existing id when an identical triple is already registered, or 0 on full /
+// invalid input. version is required; artifact/sha256 may be empty.
+static int createVersion(const char* version, const char* artifact, const char* sha) {
+  if (!version[0] || g_versionCount >= MAX_VERSIONS) return 0;
+  for (int i = 0; i < g_versionCount; i++)
+    if (!strcmp(g_versions[i].version, version) && !strcmp(g_versions[i].artifact, artifact) && !strcmp(g_versions[i].sha256, sha))
+      return g_versions[i].id;
+  VersionRecord& v = g_versions[g_versionCount];
+  v = VersionRecord{};
+  v.id = g_settings.nextVersionId++;
+  strncpy(v.version,  version,  sizeof(v.version) - 1);
+  strncpy(v.artifact, artifact, sizeof(v.artifact) - 1);
+  strncpy(v.sha256,   sha,      sizeof(v.sha256) - 1);
+  g_versionCount++;
+  saveVersions();
+  saveSettings();
+  return v.id;
+}
+
+// editVersion updates an existing record in place (id preserved), so every global
+// and per-device selection pointing at it picks up the corrected triple.
+static bool editVersion(int id, const char* version, const char* artifact, const char* sha) {
+  if (!version[0]) return false;
+  VersionRecord* v = versionById(id);
+  if (!v) return false;
+  strncpy(v->version,  version,  sizeof(v->version) - 1);  v->version[sizeof(v->version) - 1] = 0;
+  strncpy(v->artifact, artifact, sizeof(v->artifact) - 1); v->artifact[sizeof(v->artifact) - 1] = 0;
+  strncpy(v->sha256,   sha,      sizeof(v->sha256) - 1);   v->sha256[sizeof(v->sha256) - 1] = 0;
+  saveVersions();
+  return true;
+}
+
+// deleteVersion removes a record and clears any selection that pointed at it, so
+// the global default and affected devices fall back to "none" rather than dangle.
+static bool deleteVersion(int id) {
+  int idx = -1;
+  for (int i = 0; i < g_versionCount; i++) if (g_versions[i].id == id) { idx = i; break; }
+  if (idx < 0) return false;
+  for (int i = idx; i < g_versionCount - 1; i++) g_versions[i] = g_versions[i + 1];
+  g_versionCount--;
+  bool devicesTouched = false;
+  if (g_settings.selectedVersionId == id) { g_settings.selectedVersionId = 0; saveSettings(); }
+  for (int i = 0; i < g_deviceCount; i++)
+    if (g_devices[i].selectedVersionId == id) { g_devices[i].selectedVersionId = 0; devicesTouched = true; }
+  saveVersions();
+  if (devicesTouched) saveDevices();
+  return true;
 }
 
 // setLockAllMessage stores the message shown on every client's lock screen when

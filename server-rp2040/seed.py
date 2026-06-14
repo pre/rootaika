@@ -175,10 +175,9 @@ def device_record(device_id, name):
         "upload": 60,
         "poll": 30,
         "lastSeen": events_last_seen.get(device_id, ""),
-        # OTA auto-update: no per-device override and no reported version yet.
-        "desiredVersion": "",
-        "desiredArtifact": "",
-        "desiredSha256": "",
+        # OTA auto-update: no per-device version selection (0 = inherit global)
+        # and no reported version yet.
+        "selectedVersionId": 0,
         "lastVersion": "",
         "lastVersionAt": "",
     }
@@ -205,11 +204,16 @@ def write_files(seed_dir, names, events):
         "chartYMax": 720, "boardRefresh": 60,
         "debug": False, "debugUnassigned": False, "soundVer": 0,
         "nextDeviceId": len(names) + 1, "nextUserId": 1, "nextCategoryId": 1,
-        # OTA auto-update: no global desired client version by default.
-        "desiredVersion": "", "artifactName": "", "sha256": "",
+        "nextVersionId": 1,
+        # OTA auto-update: empty version registry and no global selection.
+        "selectedVersionId": 0,
     }
     with open(os.path.join(seed_dir, "settings.json"), "w") as f:
         json.dump(settings, f)
+
+    # versions.json: empty OTA version registry by default.
+    with open(os.path.join(seed_dir, "versions.json"), "w") as f:
+        json.dump([], f)
 
     with open(os.path.join(seed_dir, "events.jsonl"), "w") as f:
         for e in events:

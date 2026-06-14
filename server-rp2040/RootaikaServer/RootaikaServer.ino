@@ -400,13 +400,9 @@ void adminSettings(WiFiClient& c, const char* body) {
   s.debugUnassigned = formCheckbox(body, "debug_unassigned_clients");
   updateSettings(s);
 
-  // Global OTA desired-version triple is independent of the numeric validation
-  // above, so it is applied separately (any field may be empty = no update).
-  char ver[24], artifact[64], sha[72];
-  formField(body, "desired_client_version", ver, sizeof(ver));
-  formField(body, "client_artifact_name", artifact, sizeof(artifact));
-  formField(body, "client_sha256", sha, sizeof(sha));
-  setGlobalDesiredVersion(ver, artifact, sha);
+  // Global OTA version selection: the id of a registered version record (0 =
+  // none). Independent of the numeric validation above, applied separately.
+  setGlobalSelectedVersion(formInt(body, "selected_version_id", 0));
 
   sendRedirect(c, "/settings#settings");
 }
@@ -472,15 +468,37 @@ void adminDeviceDelete(WiFiClient& c, int id) {
   sendRedirect(c, "/settings#devices");
 }
 
-// adminDeviceVersion sets/clears a device's per-device OTA override triple. An
-// empty version clears all three, so the device inherits the global triple.
+// adminDeviceVersion points a device at a registered version id, or 0 to inherit
+// the global selection.
 void adminDeviceVersion(WiFiClient& c, int id, const char* body) {
-  char ver[24], artifact[64], sha[72];
-  formField(body, "desired_version", ver, sizeof(ver));
-  formField(body, "desired_artifact_name", artifact, sizeof(artifact));
-  formField(body, "desired_sha256", sha, sizeof(sha));
-  setDeviceDesiredVersion(id, ver, artifact, sha);
+  setDeviceSelectedVersion(id, formInt(body, "selected_version_id", 0));
   sendRedirect(c, "/settings#devices");
+}
+
+// adminCreateVersion registers a new selectable version triple (version required).
+void adminCreateVersion(WiFiClient& c, const char* body) {
+  char ver[24], artifact[64], sha[72];
+  formField(body, "version", ver, sizeof(ver));
+  formField(body, "artifact", artifact, sizeof(artifact));
+  formField(body, "sha256", sha, sizeof(sha));
+  createVersion(ver, artifact, sha);
+  sendRedirect(c, "/settings#versions");
+}
+
+// adminEditVersion updates a registered version record in place.
+void adminEditVersion(WiFiClient& c, int id, const char* body) {
+  char ver[24], artifact[64], sha[72];
+  formField(body, "version", ver, sizeof(ver));
+  formField(body, "artifact", artifact, sizeof(artifact));
+  formField(body, "sha256", sha, sizeof(sha));
+  editVersion(id, ver, artifact, sha);
+  sendRedirect(c, "/settings#versions");
+}
+
+// adminDeleteVersion removes a registered version; selections pointing at it reset.
+void adminDeleteVersion(WiFiClient& c, int id) {
+  deleteVersion(id);
+  sendRedirect(c, "/settings#versions");
 }
 
 void adminCreateCategory(WiFiClient& c, const char* body) {
@@ -647,6 +665,9 @@ void routeAdmin(WiFiClient& c, const char* path, const char* body) {
   if (!strcmp(seg0, "devices") && id > 0 && !strcmp(seg2, "version"))    { adminDeviceVersion(c, id, body); return; }
   if (!strcmp(seg0, "categories") && id == 0)                           { adminCreateCategory(c, body); return; }
   if (!strcmp(seg0, "categories") && id > 0 && !strcmp(seg2, "delete"))  { adminDeleteCategory(c, id); return; }
+  if (!strcmp(seg0, "versions") && id == 0)                             { adminCreateVersion(c, body); return; }
+  if (!strcmp(seg0, "versions") && id > 0 && !strcmp(seg2, "edit"))      { adminEditVersion(c, id, body); return; }
+  if (!strcmp(seg0, "versions") && id > 0 && !strcmp(seg2, "delete"))    { adminDeleteVersion(c, id); return; }
 
   c.print(F("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n"));
   c.flush(); c.stop();
