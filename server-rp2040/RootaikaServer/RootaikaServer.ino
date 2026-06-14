@@ -56,8 +56,9 @@ bool     prevPressed  = false;
 uint32_t pressStartMs = 0;
 bool     longFired    = false;
 const uint32_t LONG_PRESS_MS = 1000;
-// Pre-lock warning countdown applied by the POST /api/v1/lock toggle, so a
-// client shows a warning (banner + sound) before the screen locks.
+// Pre-lock warning countdown applied by the POST /api/v1/lock toggle and the admin
+// "Lock all" button, so a client shows a warning (banner + sound) before the screen
+// locks. The physical button short press locks immediately (no warning) by design.
 const int LOCK_TOGGLE_WARN_SECONDS = 60;
 // Default lock-screen message for the POST /api/v1/lock toggle.
 const char LOCK_TOGGLE_MESSAGE[] = "rootaika";
@@ -422,7 +423,7 @@ void adminSettings(WiFiClient& c, const char* body) {
 void adminLockAll(WiFiClient& c, const char* body) {
   char msg[64]; formField(body, "message", msg, sizeof(msg));
   setLockAllMessage(msg);
-  lockAllAssigned(g_settings.lockAllMessage);
+  lockAllAssigned(g_settings.lockAllMessage, LOCK_TOGGLE_WARN_SECONDS);
   applyLockLed();
   sendRedirect(c, "/settings#lockall");
 }
@@ -884,7 +885,7 @@ void loop() {
     applyLockLed();
     longFired = true;
   } else if (!buttonPressed && prevPressed) {
-    if (!longFired) { lockAllAssigned(g_settings.lockAllMessage); applyLockLed(); }
+    if (!longFired) { lockAllAssigned(g_settings.lockAllMessage, 0); applyLockLed(); }
   }
   prevPressed = buttonPressed;
 

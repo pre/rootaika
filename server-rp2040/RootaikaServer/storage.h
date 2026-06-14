@@ -661,16 +661,18 @@ static bool toggleAllLocks(const char* msg, int warnSeconds, int* affectedOut) {
   return lock;
 }
 
-// lockAllAssigned force-locks every assigned device with msg (no warning delay).
-// Backs the physical button's short press, whose contract is "lock", not "toggle".
-static int lockAllAssigned(const char* msg) {
+// lockAllAssigned force-locks every assigned device with msg and a warnSeconds
+// pre-lock countdown, so clients show the warning banner + sound before the screen
+// locks. Backs the physical button's short press and the admin "Lock all" button,
+// whose contract is "lock", not "toggle".
+static int lockAllAssigned(const char* msg, int warnSeconds) {
   int affected = 0;
   for (int i = 0; i < g_deviceCount; i++) {
     if (!isAssigned(g_devices[i])) continue;
     g_devices[i].locked = true;
     strncpy(g_devices[i].lockMsg, msg, sizeof(g_devices[i].lockMsg) - 1);
     g_devices[i].lockMsg[sizeof(g_devices[i].lockMsg) - 1] = 0;
-    g_devices[i].warnSeconds = 0;
+    g_devices[i].warnSeconds = warnSeconds;
     affected++;
   }
   saveDevices();
