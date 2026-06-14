@@ -2,18 +2,20 @@ package agentrunner
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestResolvePathExplicit(t *testing.T) {
-	r := &Runner{Path: "/opt/custom/agent"}
+	r := &Runner{Path: "/opt/custom/rootaika"}
 	got, err := r.resolvePath()
 	if err != nil {
 		t.Fatalf("resolvePath: %v", err)
 	}
-	if got != "/opt/custom/agent" {
+	if got != "/opt/custom/rootaika" {
 		t.Fatalf("explicit path not returned, got %q", got)
 	}
 }
@@ -24,11 +26,23 @@ func TestResolvePathDerivesFromExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolvePath: %v", err)
 	}
-	if got == "" {
-		t.Fatalf("derived path should not be empty")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
 	}
-	if base := filepath.Base(got); base != "rootaika-agent" {
-		t.Fatalf("derived path should end with rootaika-agent on linux, got %q", base)
+	if got != exe {
+		t.Fatalf("derived path should be the running executable %q, got %q", exe, got)
+	}
+}
+
+func TestArgsIncludeAgentSubcommand(t *testing.T) {
+	if got := (&Runner{}).args(); !reflect.DeepEqual(got, []string{"agent"}) {
+		t.Fatalf("args without config = %v, want [agent]", got)
+	}
+	r := &Runner{ConfigPath: "/etc/rootaika/client.json"}
+	want := []string{"agent", "-config", "/etc/rootaika/client.json"}
+	if got := r.args(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("args with config = %v, want %v", got, want)
 	}
 }
 

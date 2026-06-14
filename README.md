@@ -3,7 +3,7 @@
 A screen-time tracking and enforcement system. It has three parts:
 
 - **`server/`** – A Go HTTP server that receives client events, stores them in SQLite, and serves an HTML admin UI for reports, settings, and lock/unlock commands.
-- **`client-windows/`** – A Windows client made of two binaries: a background `rootaika-service` and a user-session `rootaika-agent`.
+- **`client-windows/`** – A Windows client built as a single `rootaika.exe` that runs both a background service and a user-session agent (`rootaika.exe service` / `rootaika.exe agent`). It updates itself over the air from a public GitHub release.
 - **`client-waveshare/`** – A Raspberry Pi + Waveshare e-ink display that shows today's per-device screen-time totals, fetched from the server as JSON.
 
 The client sends activity events to the server, polls for config and commands, and enforces screen locking.
@@ -77,34 +77,47 @@ The image builds a static binary (`CGO_ENABLED=0`), runs as a non-root user, and
 
 ## Windows client
 
-The client consists of two binaries:
+The client is a single `rootaika.exe` dispatched on its first argument, so one file swap updates everything:
 
-- `rootaika-service`: a background process that holds the config, buffers events into a local SQLite database, sends batches to the server, polls for config and commands, and keeps the agent running (watchdog).
-- `rootaika-agent`: a process that runs in the user session, reads idle time and the active process, sends `activity_observed` events to the service, and enforces lock/unlock.
+- `rootaika.exe service`: a background process that holds the config, buffers events into a local SQLite database, sends batches to the server, polls for config and commands, keeps the agent running (watchdog), and performs over-the-air updates.
+- `rootaika.exe agent`: a process that runs in the user session, reads idle time and the active process, sends `activity_observed` events to the service, and enforces lock/unlock.
+- `rootaika.exe apply-update`: a transient helper the service launches to swap the binary and restart the service during an OTA update.
 
 ### Cross-build (Linux/macOS)
 
 ```sh
 cd client-windows
 go test ./...
-GOOS=windows GOARCH=amd64 go build ./cmd/rootaika-service ./cmd/rootaika-agent
+GOOS=windows GOARCH=amd64 go build ./cmd/rootaika
 ```
 
 ### Build on Windows
 
-Use the PowerShell script, which produces both binaries into `dist/`:
+Use the PowerShell script, which produces `rootaika.exe` into `dist/`:
 
 ```powershell
 cd client-windows
-.\scripts\build.ps1
+.\scripts\build.ps1 -Version v1.2.0
 ```
 
-The agent is linked with the `-H=windowsgui` flag, so it has no console window by default (debug mode allocates a console at runtime). Alternatively, build manually:
+The binary is linked with the `-H=windowsgui` flag, so neither process shows a console by default (debug mode allocates a console at runtime). Alternatively, build manually:
 
 ```powershell
-go build .\cmd\rootaika-service
-go build -ldflags "-H=windowsgui" .\cmd\rootaika-agent
+go build -ldflags "-H=windowsgui -X rootaika/client-windows/internal/version.Version=v1.2.0" .\cmd\rootaika
 ```
+
+### Over-the-air updates
+
+The server declares a desired client version as a triple `(desired_client_version, client_artifact_name, client_sha256)`, either globally in settings or as a per-device override (test one machine first). The client reports its own version on the config poll (`client_version`); when the server's desired version differs, the service downloads the named asset from the fixed public repo `github.com/pre/rootaika`, verifies its SHA256, and launches `apply-update` to swap the file and restart, without rebooting Windows. A failed version is not retried for 30 minutes, so a bad release cannot spin.
+
+Publish a release from a Linux box with `gh` authenticated:
+
+```sh
+cd client-windows
+scripts/release.sh v1.2.0
+```
+
+This cross-compiles `rootaika.exe`, creates the public GitHub release, and prints the triple to paste into the admin UI.
 
 ### Install (PowerShell as administrator)
 
@@ -114,10 +127,10 @@ go build -ldflags "-H=windowsgui" .\cmd\rootaika-agent
 
 The script:
 
-- copies the binaries to `C:\Program Files\rootaika`,
+- copies `rootaika.exe` to `C:\Program Files\rootaika`,
 - writes the config to `C:\ProgramData\rootaika\client.json`,
-- registers the `rootaika-service` service with auto-start and crash recovery (`restart/5000` three times),
-- registers the agent to start on user logon (HKLM `Run`),
+- registers the `rootaika-service` service (`rootaika.exe service`) with auto-start and crash recovery (`restart/5000` three times),
+- registers the agent (`rootaika.exe agent`) to start on user logon (HKLM `Run`),
 - starts the service and agent immediately.
 
 ### Uninstall
@@ -144,7 +157,7 @@ The environment variables `ROOTAIKA_SERVER_URL`, `ROOTAIKA_CLIENT_USERNAME`, `RO
 
 ### Running in debug mode
 
-Debug mode is read only from the config file's `debug_mode` field (or from the config the server pushes down). There is no command-line flag or environment variable for it. The binaries accept only `-config`. When the agent is built with `-H=windowsgui`, `debug_mode: true` opens a console window at runtime.
+Debug mode is read only from the config file's `debug_mode` field (or from the config the server pushes down). There is no command-line flag or environment variable for it. Each subcommand accepts only `-config`. When built with `-H=windowsgui`, `debug_mode: true` opens a console window at runtime.
 
 To run against a specific server (for example `192.168.68.126:8080`) without touching the installed `C:\ProgramData\rootaika\client.json`, create a separate config such as `debug.json`:
 
@@ -158,14 +171,10 @@ To run against a specific server (for example `192.168.68.126:8080`) without tou
 }
 ```
 
-Then start both binaries against it in two separate windows:
+Then start the service against it (its watchdog launches the agent from the same exe):
 
 ```powershell
-# Window 1: service
-.\rootaika-service.exe -config .\debug.json
-
-# Window 2: agent (debug_mode opens a console at runtime)
-.\rootaika-agent.exe -config .\debug.json
+.\rootaika.exe service -config .\debug.json
 ```
 
 The service fills in any missing fields (`client_id`, `agent_token`, intervals, db path) and saves them back on first run. Notes:
@@ -180,7 +189,7 @@ For more detail, see [`client-windows/README.md`](client-windows/README.md) and 
 ## End-to-end setup
 
 1. Start the server (Docker or binary) and set strong `ROOTAIKA_ADMIN_PASSWORD` and `ROOTAIKA_CLIENT_PASSWORD` values.
-2. Build the client with the `scripts\build.ps1` script.
+2. Build the client (`rootaika.exe`) with the `scripts\build.ps1` script.
 3. Install the client on each Windows machine with `scripts\install.ps1`, providing the server URL and client password.
 4. Manage machines, reports, and locks from the admin UI at `http://<server>:8080/`.
 

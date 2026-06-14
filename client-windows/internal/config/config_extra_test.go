@@ -165,3 +165,18 @@ func TestResolveAndDefaultPathNonEmpty(t *testing.T) {
 		t.Fatalf("ResolvePath should preserve explicit path, got %q", got)
 	}
 }
+
+// TestApplyServerConfigIgnoresUpdateDirectives guards the invariant that the OTA
+// desired-version triple is transient: it must never be written into the on-disk
+// config, so ApplyServerConfig reports no change for it.
+func TestApplyServerConfigIgnoresUpdateDirectives(t *testing.T) {
+	cfg := &Config{}
+	changed := cfg.ApplyServerConfig(model.ClientConfig{
+		DesiredVersion: "v9.9.9",
+		ArtifactName:   "rootaika.exe",
+		SHA256:         "deadbeef",
+	})
+	if changed {
+		t.Fatalf("update directives must not change persisted config")
+	}
+}

@@ -49,4 +49,11 @@ type ClientConfig struct {
 	LockMessage            string `json:"lock_message,omitempty"`
 	WarningSeconds         int    `json:"warning_seconds,omitempty"`
 	WarningSoundVersion    string `json:"warning_sound_version,omitempty"`
+	// OTA update directives. These are transient: they tell the service which
+	// release to install and must never be persisted to client.json (see
+	// config.ApplyServerConfig, which deliberately ignores them). All empty means
+	// no update is desired.
+	DesiredVersion string `json:"desired_version,omitempty"`
+	ArtifactName   string `json:"artifact_name,omitempty"`
+	SHA256         string `json:"sha256,omitempty"`
 }

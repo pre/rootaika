@@ -2,16 +2,16 @@ package agentrunner
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"sync"
 )
 
 type Runner struct {
+	// Path is the combined rootaika exe to launch the agent from. When empty it
+	// resolves to the currently running executable, so the service and agent
+	// always come from the one on-disk file and a single OTA swap updates both.
 	Path       string
 	ConfigPath string
 
@@ -45,11 +45,7 @@ func (r *Runner) Ensure(ctx context.Context) error {
 		return err
 	}
 
-	args := []string{}
-	if r.ConfigPath != "" {
-		args = append(args, "-config", r.ConfigPath)
-	}
-	cmd := exec.CommandContext(ctx, path, args...)
+	cmd := exec.CommandContext(ctx, path, r.args()...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -65,21 +61,21 @@ func (r *Runner) Ensure(ctx context.Context) error {
 	return nil
 }
 
+// resolvePath returns the combined exe to run. An explicit Path wins; otherwise
+// the running executable is used so both processes share one file.
 func (r *Runner) resolvePath() (string, error) {
 	if r.Path != "" {
 		return r.Path, nil
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
+	return os.Executable()
+}
+
+// args is the argument vector for the combined binary: the agent subcommand
+// followed by the optional config path.
+func (r *Runner) args() []string {
+	args := []string{"agent"}
+	if r.ConfigPath != "" {
+		args = append(args, "-config", r.ConfigPath)
 	}
-	name := "rootaika-agent"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	path := filepath.Join(filepath.Dir(exe), name)
-	if path == "" {
-		return "", fmt.Errorf("agent path is empty")
-	}
-	return path, nil
+	return args
 }

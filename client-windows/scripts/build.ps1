@@ -1,15 +1,20 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Builds the rootaika Windows client binaries.
+  Builds the rootaika Windows client binary.
 .DESCRIPTION
-  Produces rootaika-service.exe and rootaika-agent.exe into the output directory.
-  The agent is linked with -H=windowsgui so it has no console window by default;
-  debug mode allocates a console on demand at runtime.
+  Produces a single rootaika.exe into the output directory. One exe runs both the
+  service and the user-session agent, dispatched on the first argument
+  (rootaika.exe service / rootaika.exe agent / rootaika.exe apply-update). It is
+  linked with -H=windowsgui so neither process shows a console by default; debug
+  mode allocates one on demand at runtime.
+.PARAMETER Version
+  Version string baked into the binary via ldflags. Defaults to "dev".
 #>
 [CmdletBinding()]
 param(
-    [string]$OutDir = (Join-Path $PSScriptRoot "..\dist")
+    [string]$OutDir = (Join-Path $PSScriptRoot "..\dist"),
+    [string]$Version = "dev"
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,15 +24,12 @@ $OutDir = Resolve-Path $OutDir
 
 Push-Location $clientRoot
 try {
-    Write-Host "Building rootaika-service.exe..."
-    & go build -o (Join-Path $OutDir "rootaika-service.exe") ./cmd/rootaika-service
-    if ($LASTEXITCODE -ne 0) { throw "service build failed" }
+    Write-Host "Building rootaika.exe (version $Version, no console)..."
+    $ldflags = "-H=windowsgui -X rootaika/client-windows/internal/version.Version=$Version"
+    & go build -ldflags $ldflags -o (Join-Path $OutDir "rootaika.exe") ./cmd/rootaika
+    if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
-    Write-Host "Building rootaika-agent.exe (no console)..."
-    & go build -ldflags "-H=windowsgui" -o (Join-Path $OutDir "rootaika-agent.exe") ./cmd/rootaika-agent
-    if ($LASTEXITCODE -ne 0) { throw "agent build failed" }
-
-    Write-Host "Built binaries into $OutDir"
+    Write-Host "Built rootaika.exe into $OutDir"
 }
 finally {
     Pop-Location

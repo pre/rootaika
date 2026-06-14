@@ -1,19 +1,15 @@
-package main
+package agentapp
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
 	"path"
 	"strings"
-	"syscall"
 	"time"
 
 	"rootaika/client-windows/internal/activity"
@@ -28,20 +24,8 @@ import (
 // bounded well below max_countable_gap_seconds even on quiet periods.
 const heartbeat = 60 * time.Second
 
-func main() {
-	var cfgPath string
-	flag.StringVar(&cfgPath, "config", config.DefaultPath(), "path to client config JSON")
-	flag.Parse()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if err := run(ctx, cfgPath); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func run(ctx context.Context, cfgPath string) error {
+// Run executes the user-session agent loop until the context is cancelled.
+func Run(ctx context.Context, cfgPath string) error {
 	cfg, err := config.LoadOrCreate(cfgPath)
 	if err != nil {
 		return err

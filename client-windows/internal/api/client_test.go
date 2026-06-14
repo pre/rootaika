@@ -44,6 +44,9 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 			if r.URL.Query().Get("status") != "locked" {
 				t.Fatalf("missing status query, got %q", r.URL.Query().Get("status"))
 			}
+			if r.URL.Query().Get("client_version") != "v1.0.0" {
+				t.Fatalf("missing client_version query, got %q", r.URL.Query().Get("client_version"))
+			}
 			return testResponse(http.StatusOK, `{"config_version":"abc123","idle_threshold_seconds":30,"upload_interval_seconds":15,"poll_interval_seconds":5,"locked":true,"lock_message":"Aika lopettaa"}`), nil
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -67,7 +70,7 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 		t.Fatalf("PostEvents: %v", err)
 	}
 
-	cfg, err := client.FetchConfig(ctx, "client-1", "locked", "", 0)
+	cfg, err := client.FetchConfig(ctx, "client-1", "locked", "", "v1.0.0", 0)
 	if err != nil {
 		t.Fatalf("FetchConfig: %v", err)
 	}
@@ -92,7 +95,7 @@ func TestFetchConfigSendsWaitAndVersion(t *testing.T) {
 		}),
 	})
 
-	cfg, err := client.FetchConfig(context.Background(), "client-1", "", "v1", 25)
+	cfg, err := client.FetchConfig(context.Background(), "client-1", "", "v1", "", 25)
 	if err != nil {
 		t.Fatalf("FetchConfig: %v", err)
 	}
@@ -117,7 +120,7 @@ func TestFetchConfigOmitsWaitWhenZero(t *testing.T) {
 		}),
 	})
 
-	if _, err := client.FetchConfig(context.Background(), "client-1", "", "v1", 0); err != nil {
+	if _, err := client.FetchConfig(context.Background(), "client-1", "", "v1", "", 0); err != nil {
 		t.Fatalf("FetchConfig: %v", err)
 	}
 	if hadWait || hadVersion {
@@ -141,7 +144,7 @@ func TestRetriesOnServerErrorThenSucceeds(t *testing.T) {
 		return testResponse(http.StatusOK, `{"commands":[]}`), nil
 	}))
 
-	if _, err := client.FetchConfig(context.Background(), "client-1", "", "", 0); err != nil {
+	if _, err := client.FetchConfig(context.Background(), "client-1", "", "", "", 0); err != nil {
 		t.Fatalf("FetchConfig: %v", err)
 	}
 	if calls != 3 {
@@ -173,7 +176,7 @@ func TestRetriesOnTransportErrorAndGivesUp(t *testing.T) {
 	client.WithRetry(3, time.Millisecond, time.Millisecond)
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
-	if _, err := client.FetchConfig(context.Background(), "client-1", "", "", 0); err == nil {
+	if _, err := client.FetchConfig(context.Background(), "client-1", "", "", "", 0); err == nil {
 		t.Fatalf("expected error after exhausting retries")
 	}
 	if calls != 3 {
@@ -190,7 +193,7 @@ func TestStopsRetryingWhenContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := client.FetchConfig(ctx, "client-1", "", "", 0); err == nil {
+	if _, err := client.FetchConfig(ctx, "client-1", "", "", "", 0); err == nil {
 		t.Fatalf("expected error on cancelled context")
 	}
 	if calls != 1 {

@@ -94,10 +94,16 @@ func (c *Client) DownloadWarningSound(ctx context.Context) ([]byte, error) {
 // change reaches the client within milliseconds instead of at the next poll.
 // knownVersion is the config_version from the previous successful fetch; an
 // empty version disables blocking for this call and the server returns at once.
-func (c *Client) FetchConfig(ctx context.Context, clientID, status, knownVersion string, waitSeconds int) (model.ClientConfig, error) {
+// clientVersion is this client's own build version, reported so the server can
+// record it and decide whether an OTA update is due; it travels as
+// client_version, kept distinct from the long-poll config version query param.
+func (c *Client) FetchConfig(ctx context.Context, clientID, status, knownVersion, clientVersion string, waitSeconds int) (model.ClientConfig, error) {
 	q := url.Values{"client_id": []string{clientID}}
 	if status != "" {
 		q.Set("status", status)
+	}
+	if clientVersion != "" {
+		q.Set("client_version", clientVersion)
 	}
 	if waitSeconds > 0 {
 		q.Set("wait", strconv.Itoa(waitSeconds))

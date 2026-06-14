@@ -37,9 +37,11 @@ if (Get-ItemProperty -Path $runKey -Name $runValue -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $runKey -Name $runValue
 }
 
-$agent = Get-Process -Name "rootaika-agent" -ErrorAction SilentlyContinue
+# Both the agent and any leftover apply-update helper run from rootaika.exe; the
+# service in session 0 was already stopped above, so stopping the rest is safe.
+$agent = Get-Process -Name "rootaika" -ErrorAction SilentlyContinue
 if ($agent) {
-    Write-Host "Stopping running agent process(es)..."
+    Write-Host "Stopping running rootaika process(es)..."
     $agent | Stop-Process -Force
 }
 

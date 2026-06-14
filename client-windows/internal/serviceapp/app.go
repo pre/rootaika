@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -15,6 +17,8 @@ import (
 	"rootaika/client-windows/internal/buffer"
 	"rootaika/client-windows/internal/config"
 	"rootaika/client-windows/internal/model"
+	"rootaika/client-windows/internal/updater"
+	"rootaika/client-windows/internal/version"
 )
 
 type stateStore struct {
@@ -23,6 +27,11 @@ type stateStore struct {
 	current       config.Config
 	lastReported  string
 	configVersion string
+	// failedUpdate records the last OTA version that failed to download/apply and
+	// when, so the poll loop can skip retrying a bad release for a cooldown window
+	// instead of spinning on every poll.
+	failedUpdate     string
+	failedUpdateTime time.Time
 }
 
 func Run(ctx context.Context, cfgPath string) error {
@@ -194,7 +203,7 @@ func pollOnce(ctx context.Context, store *stateStore) error {
 	client := api.New(cfg.ServerURL, cfg.ClientUsername, cfg.ClientPassword).
 		WithTimeout(time.Duration(wait+10) * time.Second)
 
-	serverConfig, err := client.FetchConfig(ctx, cfg.ClientID, store.reported(), store.version(), wait)
+	serverConfig, err := client.FetchConfig(ctx, cfg.ClientID, store.reported(), store.version(), version.Version, wait)
 	if err != nil {
 		return err
 	}
@@ -222,8 +231,73 @@ func pollOnce(ctx context.Context, store *stateStore) error {
 	}
 
 	log.Printf("config applied: locked=%t", store.snapshot().Locked)
+
+	// OTA update check. The desired-version triple is transient (never persisted),
+	// so it is read straight off the server response. A failure is logged but not
+	// fatal: the client keeps running the current version and retries after a
+	// cooldown, so a bad release cannot wedge the device.
+	if err := maybeUpdate(ctx, store, serverConfig); err != nil {
+		log.Printf("self-update failed: %v", err)
+	}
 	return nil
 }
+
+// updateRetryCooldown is how long the client waits before retrying a desired
+// version that previously failed to download or apply, so a broken release does
+// not spin on every poll.
+const updateRetryCooldown = 30 * time.Minute
+
+// updateExeName / stagedExeName are the on-disk names of the live binary and the
+// staged download next to it in the install directory.
+const (
+	updateExeName = "rootaika.exe"
+	stagedExeName = "rootaika.update.exe"
+)
+
+// maybeUpdate downloads and launches an OTA update when the server's desired
+// version differs from the running one. It returns nil when no update is needed.
+// The actual swap happens in a detached apply-update helper; this function only
+// stages the verified binary and launches that helper, then asks the process to
+// stop so the helper can replace the file.
+func maybeUpdate(ctx context.Context, store *stateStore, sc model.ClientConfig) error {
+	plan := updater.Plan{
+		Version:  sc.DesiredVersion,
+		Artifact: sc.ArtifactName,
+		SHA256:   sc.SHA256,
+	}
+	if !updater.NeedsUpdate(version.Version, plan) {
+		return nil
+	}
+	if store.updateOnCooldown(plan.Version, time.Now()) {
+		return nil
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	installDir := filepath.Dir(exe)
+	staged := filepath.Join(installDir, stagedExeName)
+	target := filepath.Join(installDir, updateExeName)
+
+	log.Printf("self-update: downloading %s (%s)", plan.Version, plan.Artifact)
+	if err := updater.Download(ctx, plan, staged); err != nil {
+		store.recordFailedUpdate(plan.Version, time.Now())
+		return fmt.Errorf("download %s: %w", plan.Version, err)
+	}
+
+	log.Printf("self-update: launching apply-update helper")
+	args := []string{"apply-update", "-target", target, "-staged", staged, "-service", serviceName, "-agent-process", updateExeName}
+	if err := updater.LaunchDetached(staged, args); err != nil {
+		store.recordFailedUpdate(plan.Version, time.Now())
+		return fmt.Errorf("launch apply-update: %w", err)
+	}
+	return nil
+}
+
+// serviceName is the Windows service name install.ps1 registers; the apply-update
+// helper stops and starts it around the file swap.
+const serviceName = "rootaika-service"
 
 func watchdogLoop(ctx context.Context, store *stateStore, cfgPath string) {
 	runner := &agentrunner.Runner{ConfigPath: cfgPath}
@@ -267,6 +341,26 @@ func (s *stateStore) version() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.configVersion
+}
+
+// recordFailedUpdate remembers a version that failed so updateOnCooldown can
+// suppress retries of the same version for updateRetryCooldown.
+func (s *stateStore) recordFailedUpdate(ver string, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failedUpdate = ver
+	s.failedUpdateTime = now
+}
+
+// updateOnCooldown reports whether the given version recently failed and is still
+// within the retry cooldown window. A different version always clears the guard.
+func (s *stateStore) updateOnCooldown(ver string, now time.Time) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.failedUpdate != ver {
+		return false
+	}
+	return now.Sub(s.failedUpdateTime) < updateRetryCooldown
 }
 
 func (s *stateStore) update(fn func(*config.Config) bool) error {
