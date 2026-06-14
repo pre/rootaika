@@ -1,6 +1,7 @@
 package rootaika
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,6 +116,11 @@ func validateBatch(request batchRequest) ([]EventInput, error) {
 	return events, nil
 }
 
+// maxConfigWaitSeconds caps how long a long-poll config request may block. It
+// bounds server-side resource use and keeps the held request well under any
+// reverse-proxy idle timeout a future deployment might introduce.
+const maxConfigWaitSeconds = 60
+
 func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -138,6 +144,55 @@ func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	// Long poll: when the client passes wait and its last-seen version still
+	// matches the current config, hold the request open so a later change is
+	// delivered the instant it happens instead of at the next poll interval.
+	wait := clampWaitSeconds(r.URL.Query().Get("wait"))
+	known := r.URL.Query().Get("version")
+	if wait > 0 && known != "" && configVersion(config) == known {
+		updated, ok := a.waitForConfigChange(r.Context(), clientID, known, wait)
+		if !ok {
+			// Client disconnected mid-wait; nothing to write.
+			return
+		}
+		config = updated
+	}
+
+	a.writeClientConfig(w, clientID, config)
+}
+
+// waitForConfigChange blocks until the device's effective config version
+// differs from known, the wait budget elapses, or the client disconnects. It
+// subscribes before re-reading so a change racing the read is never missed. The
+// returned bool is false only when the request context is cancelled.
+func (a *App) waitForConfigChange(ctx context.Context, clientID, known string, wait int) (ClientConfig, bool) {
+	timer := time.NewTimer(time.Duration(wait) * time.Second)
+	defer timer.Stop()
+	for {
+		changed := a.notifier.subscribe()
+
+		config, err := a.store.ClientConfig(ctx, clientID, a.now())
+		if err != nil {
+			// Treat a transient read error like a timeout: fall back to
+			// returning the last good config to the caller.
+			return ClientConfig{}, false
+		}
+		if configVersion(config) != known {
+			return config, true
+		}
+
+		select {
+		case <-ctx.Done():
+			return ClientConfig{}, false
+		case <-timer.C:
+			return config, true
+		case <-changed:
+		}
+	}
+}
+
+func (a *App) writeClientConfig(w http.ResponseWriter, clientID string, config ClientConfig) {
 	categories := make([]map[string]string, 0, len(config.Categories))
 	for _, category := range config.Categories {
 		categories = append(categories, map[string]string{
@@ -149,6 +204,7 @@ func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"client_id":                 clientID,
+		"config_version":            configVersion(config),
 		"idle_threshold_seconds":    config.IdleThresholdSeconds,
 		"upload_interval_seconds":   config.UploadIntervalSeconds,
 		"poll_interval_seconds":     config.PollIntervalSeconds,
@@ -159,6 +215,20 @@ func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 		"warning_seconds":           config.WarningSeconds,
 		"categories":                categories,
 	})
+}
+
+// clampWaitSeconds parses the long-poll wait budget, clamping to
+// 0..maxConfigWaitSeconds. Zero (blank/invalid/non-positive) disables long
+// polling so the request returns immediately, preserving legacy poll behavior.
+func clampWaitSeconds(raw string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		return 0
+	}
+	if value > maxConfigWaitSeconds {
+		return maxConfigWaitSeconds
+	}
+	return value
 }
 
 func (a *App) handleAdmin(w http.ResponseWriter, r *http.Request) {
@@ -215,6 +285,7 @@ func (a *App) adminDeviceCommand(w http.ResponseWriter, r *http.Request, rawDevi
 		http.Error(w, "set device lock failed", http.StatusInternalServerError)
 		return
 	}
+	a.notifier.notify()
 	redirect(w, r, "/settings#devices")
 }
 
@@ -237,6 +308,7 @@ func (a *App) adminAssignDevice(w http.ResponseWriter, r *http.Request, rawDevic
 		http.Error(w, "update device failed", http.StatusInternalServerError)
 		return
 	}
+	a.notifier.notify()
 	redirect(w, r, "/settings#devices")
 }
 
@@ -263,6 +335,7 @@ func (a *App) adminSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "update settings failed", http.StatusInternalServerError)
 		return
 	}
+	a.notifier.notify()
 	redirect(w, r, "/settings#settings")
 }
 
@@ -272,6 +345,7 @@ func (a *App) adminCreateCategory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	a.notifier.notify()
 	redirect(w, r, "/settings#categories")
 }
 
@@ -285,6 +359,7 @@ func (a *App) adminDeleteCategory(w http.ResponseWriter, r *http.Request, rawID 
 		http.Error(w, "delete category failed", http.StatusInternalServerError)
 		return
 	}
+	a.notifier.notify()
 	redirect(w, r, "/settings#categories")
 }
 

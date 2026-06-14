@@ -44,7 +44,7 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 			if r.URL.Query().Get("status") != "locked" {
 				t.Fatalf("missing status query, got %q", r.URL.Query().Get("status"))
 			}
-			return testResponse(http.StatusOK, `{"idle_threshold_seconds":30,"upload_interval_seconds":15,"poll_interval_seconds":5,"locked":true,"lock_message":"Aika lopettaa"}`), nil
+			return testResponse(http.StatusOK, `{"config_version":"abc123","idle_threshold_seconds":30,"upload_interval_seconds":15,"poll_interval_seconds":5,"locked":true,"lock_message":"Aika lopettaa"}`), nil
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 			return nil, nil
@@ -67,7 +67,7 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 		t.Fatalf("PostEvents: %v", err)
 	}
 
-	cfg, err := client.FetchConfig(ctx, "client-1", "locked")
+	cfg, err := client.FetchConfig(ctx, "client-1", "locked", "", 0)
 	if err != nil {
 		t.Fatalf("FetchConfig: %v", err)
 	}
@@ -76,6 +76,52 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 	}
 	if cfg.Locked == nil || !*cfg.Locked || cfg.LockMessage != "Aika lopettaa" {
 		t.Fatalf("unexpected lock in config: %+v", cfg)
+	}
+	if cfg.ConfigVersion != "abc123" {
+		t.Fatalf("unexpected config_version: %q", cfg.ConfigVersion)
+	}
+}
+
+func TestFetchConfigSendsWaitAndVersion(t *testing.T) {
+	var gotWait, gotVersion string
+	client := New("http://rootaika.test", "client", "secret").WithHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			gotWait = r.URL.Query().Get("wait")
+			gotVersion = r.URL.Query().Get("version")
+			return testResponse(http.StatusOK, `{"config_version":"v2","idle_threshold_seconds":30,"upload_interval_seconds":15,"poll_interval_seconds":5}`), nil
+		}),
+	})
+
+	cfg, err := client.FetchConfig(context.Background(), "client-1", "", "v1", 25)
+	if err != nil {
+		t.Fatalf("FetchConfig: %v", err)
+	}
+	if gotWait != "25" {
+		t.Fatalf("wait query = %q, want 25", gotWait)
+	}
+	if gotVersion != "v1" {
+		t.Fatalf("version query = %q, want v1", gotVersion)
+	}
+	if cfg.ConfigVersion != "v2" {
+		t.Fatalf("config_version = %q, want v2", cfg.ConfigVersion)
+	}
+}
+
+func TestFetchConfigOmitsWaitWhenZero(t *testing.T) {
+	var hadWait, hadVersion bool
+	client := New("http://rootaika.test", "client", "secret").WithHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			_, hadWait = r.URL.Query()["wait"]
+			_, hadVersion = r.URL.Query()["version"]
+			return testResponse(http.StatusOK, `{"idle_threshold_seconds":30,"upload_interval_seconds":15,"poll_interval_seconds":5}`), nil
+		}),
+	})
+
+	if _, err := client.FetchConfig(context.Background(), "client-1", "", "v1", 0); err != nil {
+		t.Fatalf("FetchConfig: %v", err)
+	}
+	if hadWait || hadVersion {
+		t.Fatalf("legacy poll must omit wait/version, got wait=%v version=%v", hadWait, hadVersion)
 	}
 }
 
@@ -95,7 +141,7 @@ func TestRetriesOnServerErrorThenSucceeds(t *testing.T) {
 		return testResponse(http.StatusOK, `{"commands":[]}`), nil
 	}))
 
-	if _, err := client.FetchConfig(context.Background(), "client-1", ""); err != nil {
+	if _, err := client.FetchConfig(context.Background(), "client-1", "", "", 0); err != nil {
 		t.Fatalf("FetchConfig: %v", err)
 	}
 	if calls != 3 {
@@ -127,7 +173,7 @@ func TestRetriesOnTransportErrorAndGivesUp(t *testing.T) {
 	client.WithRetry(3, time.Millisecond, time.Millisecond)
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
-	if _, err := client.FetchConfig(context.Background(), "client-1", ""); err == nil {
+	if _, err := client.FetchConfig(context.Background(), "client-1", "", "", 0); err == nil {
 		t.Fatalf("expected error after exhausting retries")
 	}
 	if calls != 3 {
@@ -144,7 +190,7 @@ func TestStopsRetryingWhenContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := client.FetchConfig(ctx, "client-1", ""); err == nil {
+	if _, err := client.FetchConfig(ctx, "client-1", "", "", 0); err == nil {
 		t.Fatalf("expected error on cancelled context")
 	}
 	if calls != 1 {

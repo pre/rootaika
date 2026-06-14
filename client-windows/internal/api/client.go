@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,15 +66,37 @@ func (c *Client) WithHTTPClient(httpClient *http.Client) *Client {
 	return c
 }
 
+// WithTimeout sets the per-request transport timeout. Long-poll config requests
+// need a cap larger than the server's wait budget, so the poll loop raises this
+// above the 10s default; a non-positive value disables the cap.
+func (c *Client) WithTimeout(d time.Duration) *Client {
+	if c.httpClient != nil {
+		c.httpClient.Timeout = d
+	}
+	return c
+}
+
 func (c *Client) PostEvents(ctx context.Context, batch model.EventBatch) error {
 	_, err := c.doJSON(ctx, http.MethodPost, "/api/v1/events/batch", nil, batch)
 	return err
 }
 
-func (c *Client) FetchConfig(ctx context.Context, clientID, status string) (model.ClientConfig, error) {
+// FetchConfig polls the server for this client's config. When waitSeconds > 0
+// it long-polls: the server holds the request open until the config changes
+// away from knownVersion or waitSeconds elapses, so a lock/unlock or settings
+// change reaches the client within milliseconds instead of at the next poll.
+// knownVersion is the config_version from the previous successful fetch; an
+// empty version disables blocking for this call and the server returns at once.
+func (c *Client) FetchConfig(ctx context.Context, clientID, status, knownVersion string, waitSeconds int) (model.ClientConfig, error) {
 	q := url.Values{"client_id": []string{clientID}}
 	if status != "" {
 		q.Set("status", status)
+	}
+	if waitSeconds > 0 {
+		q.Set("wait", strconv.Itoa(waitSeconds))
+		if knownVersion != "" {
+			q.Set("version", knownVersion)
+		}
 	}
 	body, err := c.doJSON(ctx, http.MethodGet, "/api/v1/client/config", q, nil)
 	if err != nil {

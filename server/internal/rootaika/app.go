@@ -11,6 +11,7 @@ type App struct {
 	store    *Store
 	now      func() time.Time
 	location *time.Location
+	notifier *configNotifier
 }
 
 func NewApp(store *Store) *App {
@@ -22,6 +23,7 @@ func NewApp(store *Store) *App {
 		store:    store,
 		now:      func() time.Time { return time.Now().UTC() },
 		location: location,
+		notifier: newConfigNotifier(),
 	}
 }
 

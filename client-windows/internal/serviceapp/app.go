@@ -18,10 +18,11 @@ import (
 )
 
 type stateStore struct {
-	mu           sync.RWMutex
-	path         string
-	current      config.Config
-	lastReported string
+	mu            sync.RWMutex
+	path          string
+	current       config.Config
+	lastReported  string
+	configVersion string
 }
 
 func Run(ctx context.Context, cfgPath string) error {
@@ -162,13 +163,23 @@ func uploadOnce(ctx context.Context, store *stateStore, eventBuffer *buffer.Buff
 	return eventBuffer.MarkSent(ctx, ids)
 }
 
+// minPollGapSeconds is the floor between consecutive long-poll requests. A
+// successful long poll returns either when config changed or when the server's
+// wait budget elapsed, so the loop normally re-hangs at once; this small gap
+// only guards against a misconfigured server that returns instantly, so the
+// client cannot spin into a hot loop.
+const minPollGapSeconds = 1
+
 func pollLoop(ctx context.Context, store *stateStore) {
 	for {
+		gap := minPollGapSeconds
 		if err := pollOnce(ctx, store); err != nil {
 			log.Printf("poll failed: %v", err)
+			// Back off to the configured interval only on error; a healthy long
+			// poll already paced itself by blocking on the server.
+			gap = secondsOrDefaultInt(store.snapshot().PollIntervalSeconds, 30)
 		}
-		cfg := store.snapshot()
-		if !sleep(ctx, secondsOrDefault(cfg.PollIntervalSeconds, 30)) {
+		if !sleep(ctx, time.Duration(gap)*time.Second) {
 			return
 		}
 	}
@@ -176,14 +187,19 @@ func pollLoop(ctx context.Context, store *stateStore) {
 
 func pollOnce(ctx context.Context, store *stateStore) error {
 	cfg := store.snapshot()
-	client := api.New(cfg.ServerURL, cfg.ClientUsername, cfg.ClientPassword)
+	wait := secondsOrDefaultInt(cfg.PollWaitSeconds, 25)
+	// Cap the round trip beyond the server's wait budget so the transport does
+	// not abort a healthy held request the instant it is about to return.
+	client := api.New(cfg.ServerURL, cfg.ClientUsername, cfg.ClientPassword).
+		WithTimeout(time.Duration(wait+10) * time.Second)
 
-	serverConfig, err := client.FetchConfig(ctx, cfg.ClientID, store.reported())
+	serverConfig, err := client.FetchConfig(ctx, cfg.ClientID, store.reported(), store.version(), wait)
 	if err != nil {
 		return err
 	}
-	log.Printf("received config from server %s: debug=%t idle_threshold=%ds upload=%ds poll=%ds",
-		cfg.ServerURL, serverConfig.DebugMode != nil && *serverConfig.DebugMode,
+	store.setVersion(serverConfig.ConfigVersion)
+	log.Printf("received config from server %s: version=%s debug=%t idle_threshold=%ds upload=%ds poll=%ds",
+		cfg.ServerURL, serverConfig.ConfigVersion, serverConfig.DebugMode != nil && *serverConfig.DebugMode,
 		serverConfig.IdleThresholdSeconds, serverConfig.UploadIntervalSeconds, serverConfig.PollIntervalSeconds)
 	if err := store.update(func(cfg *config.Config) bool {
 		return cfg.ApplyServerConfig(serverConfig)
@@ -226,6 +242,18 @@ func (s *stateStore) reported() string {
 	return s.lastReported
 }
 
+func (s *stateStore) setVersion(version string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.configVersion = version
+}
+
+func (s *stateStore) version() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.configVersion
+}
+
 func (s *stateStore) update(fn func(*config.Config) bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -262,10 +290,14 @@ func sleep(ctx context.Context, duration time.Duration) bool {
 }
 
 func secondsOrDefault(value int, fallback int) time.Duration {
+	return time.Duration(secondsOrDefaultInt(value, fallback)) * time.Second
+}
+
+func secondsOrDefaultInt(value int, fallback int) int {
 	if value <= 0 {
-		value = fallback
+		return fallback
 	}
-	return time.Duration(value) * time.Second
+	return value
 }
 
 type agentEventsRequest struct {

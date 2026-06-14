@@ -42,6 +42,7 @@ func (a *App) handleBoardButton(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "toggle locks failed")
 		return
 	}
+	a.notifier.notify()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"locked":   locked,
 		"affected": affected,
@@ -90,6 +91,7 @@ func (a *App) handleBoardUnlock(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "unlock failed")
 		return
 	}
+	a.notifier.notify()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"locked":   false,
 		"affected": affected,

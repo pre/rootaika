@@ -38,6 +38,7 @@ type EventBatch struct {
 }
 
 type ClientConfig struct {
+	ConfigVersion          string `json:"config_version,omitempty"`
 	IdleThresholdSeconds   int    `json:"idle_threshold_seconds"`
 	UploadIntervalSeconds  int    `json:"upload_interval_seconds"`
 	PollIntervalSeconds    int    `json:"poll_interval_seconds"`

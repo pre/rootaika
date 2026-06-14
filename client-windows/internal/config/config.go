@@ -19,6 +19,7 @@ const (
 	defaultIdleThresholdSeconds   = 60
 	defaultUploadIntervalSeconds  = 60
 	defaultPollIntervalSeconds    = 30
+	defaultPollWaitSeconds        = 25
 	defaultObserveIntervalSeconds = 5
 	defaultBatchSize              = 100
 	defaultMaxCountableGapSeconds = 300
@@ -36,6 +37,7 @@ type Config struct {
 	IdleThresholdSeconds   int    `json:"idle_threshold_seconds"`
 	UploadIntervalSeconds  int    `json:"upload_interval_seconds"`
 	PollIntervalSeconds    int    `json:"poll_interval_seconds"`
+	PollWaitSeconds        int    `json:"poll_wait_seconds"`
 	ObserveIntervalSeconds int    `json:"observe_interval_seconds"`
 	MaxCountableGapSeconds int    `json:"max_countable_gap_seconds"`
 	BatchSize              int    `json:"batch_size"`
@@ -220,6 +222,10 @@ func (c *Config) applyDefaults(path string) (bool, error) {
 	}
 	if c.PollIntervalSeconds <= 0 {
 		c.PollIntervalSeconds = defaultPollIntervalSeconds
+		changed = true
+	}
+	if c.PollWaitSeconds <= 0 {
+		c.PollWaitSeconds = defaultPollWaitSeconds
 		changed = true
 	}
 	if c.ObserveIntervalSeconds <= 0 {
