@@ -1,25 +1,29 @@
 /*
   nappi — rootaika server on iLabs Challenger RP2040 WiFi (ESP-AT WiFi).
 
-  This board IS the rootaika screen-time server (replaces the Go server).
-  Clients (macOS / Windows agents) talk to it over the rootaika client API.
+  This board IS the rootaika screen-time server (a hardware build alongside the
+  Go server/). Clients (macOS / Windows agents) talk to it over the rootaika
+  client API; the Go server stays as the reference implementation.
 
-  Implemented (client role, HTTP Basic Auth client:client):
-    POST /api/v1/events/batch    ingest activity_observed events -> LittleFS log
-    GET  /api/v1/client/config   short-poll: config + lock state (responds at once)
-    GET  /api/v1/board/today      per-device summary (minutes calc = TODO)
-    GET  /api/v1/lock             global lock status (compat: {locked,locked_count,total_count})
-    GET  /                        small human status page
+  Implemented endpoints (HTTP Basic Auth):
+    POST /api/v1/events/batch        client/admin  ingest activity_observed -> LittleFS log
+    GET  /api/v1/client/config       client/admin  per-device config + lock + categories + sound ver
+    GET  /api/v1/warning-sound       client/admin  stream the admin-uploaded MP3 (404 if none)
+    GET  /api/v1/board/today          client/admin  per-device today minutes + refresh interval
+    GET  /api/v1/lock                client/admin  global lock status {locked,locked_count,total_count}
+    POST /api/v1/lock                client/admin  toggle all assigned devices (board button)
+    POST /api/v1/unlock              client/admin  release all assigned devices
+    GET  /settings                   client/admin  admin Settings page (read-only for client)
+    POST /admin/*                    admin only    settings page mutations (urlencoded + MP3 multipart)
+    GET  /                           client/admin  live dashboard (today minutes, lock state)
 
-  Lock is driven by the PHYSICAL BUTTON (GPIO2): short press = lock all,
-  hold >=1s = unlock all. RGB NeoPixel (GPIO11) breathes red=locked / green=unlocked.
+  Lock is driven by the PHYSICAL BUTTON (GPIO2): short press = lock all assigned,
+  hold >=1s = unlock all. RGB NeoPixel (GPIO11) breathes red=locked / green=open.
 
-  NOTE ON ESP-AT LIMIT: max 5 simultaneous TCP connections. The rootaika
-  protocol's config long-poll would exhaust that with several PCs, so this
-  server intentionally answers /client/config IMMEDIATELY (ignores wait=) and
-  clients short-poll. Keep requests short-lived.
-
-  Build with a LittleFS partition, e.g. fqbn ...:flash=8388608_4194304 (4MB FS).
+  NOTE ON ESP-AT LIMIT: max 5 simultaneous TCP connections, so /client/config is
+  SHORT-poll (answers immediately, ignores wait=). Statistics views (week/month/
+  charts) are intentionally NOT ported. Build with a LittleFS partition, e.g.
+  fqbn ...:flash=8388608_4194304 (4MB FS).
 */
 
 #include <WiFiEspAT.h>
@@ -27,6 +31,8 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include "wifi.h"
+#include "storage.h"
+#include "html.h"
 
 const char* WIFI_SSID = SECRET_SSID;
 const char* WIFI_PASS = SECRET_PASS;
@@ -51,30 +57,20 @@ uint32_t pressStartMs = 0;
 bool     longFired    = false;
 const uint32_t LONG_PRESS_MS = 1000;
 
-// ---- rootaika server state ----
-bool     g_locked        = false;
-uint32_t g_configVersion = 1;
-const char* g_lockMessage = "Nappi painettu";
-// config defaults (seconds)
-const int CFG_IDLE_THRESHOLD = 300;
-const int CFG_UPLOAD_INTERVAL = 15;
-const int CFG_POLL_INTERVAL   = 5;
-const int CFG_MAX_GAP         = 300;
-const int CFG_WARNING_SECONDS = 0;
+const char* g_buttonMessage = "Nappi painettu";
 
-// ---- device registry (client_id -> device_id), persisted to LittleFS ----
-#define MAX_DEVICES 16
-char  deviceIds[MAX_DEVICES][40];
-int   deviceCount = 0;
-
-// ---- RGB NeoPixel: breathing, red=locked / green=unlocked ----
+// ---- RGB NeoPixel: breathing, red=locked / green=open ----
 Adafruit_NeoPixel pixel(1, NEOPIXEL, NEO_GRB + NEO_KHZ800);
 uint8_t  ledR = 0, ledG = 0, ledB = 0;
 const uint32_t BREATH_MS = 4000;
 uint32_t lastLedFrameMs = 0;
 
 void ledSet(uint8_t r, uint8_t g, uint8_t b) { ledR = r; ledG = g; ledB = b; }
-void applyLockLed() { if (g_locked) ledSet(255, 0, 0); else ledSet(0, 255, 0); }
+void applyLockLed() {
+  bool locked; int lc, tc;
+  globalLockState(&locked, &lc, &tc);
+  if (locked) ledSet(255, 0, 0); else ledSet(0, 255, 0);
+}
 
 void updateLed() {
   if (millis() - lastLedFrameMs < 20) return;
@@ -96,63 +92,15 @@ void updateButton() {
   }
 }
 
-void setLock(bool locked) {
-  if (locked == g_locked) return;
-  g_locked = locked;
-  g_configVersion++;
-  applyLockLed();
-  Serial.print(F("[nappi] lock=")); Serial.print(g_locked ? F("true") : F("false"));
-  Serial.print(F(" version=")); Serial.println(g_configVersion);
-}
-
-// ---------- device registry ----------
-void loadDevices() {
-  deviceCount = 0;
-  File f = LittleFS.open("/devices.txt", "r");
-  if (!f) return;
-  while (f.available() && deviceCount < MAX_DEVICES) {
-    String line = f.readStringUntil('\n');
-    line.trim();
-    if (line.length() == 0) continue;
-    line.toCharArray(deviceIds[deviceCount], 40);
-    deviceCount++;
-  }
-  f.close();
-}
-
-void saveDevices() {
-  File f = LittleFS.open("/devices.txt", "w");
-  if (!f) return;
-  for (int i = 0; i < deviceCount; i++) { f.println(deviceIds[i]); }
-  f.close();
-}
-
-int deviceIdFor(const char* cid) {
-  for (int i = 0; i < deviceCount; i++)
-    if (strcmp(deviceIds[i], cid) == 0) return i + 1;
-  if (deviceCount < MAX_DEVICES) {
-    strncpy(deviceIds[deviceCount], cid, 39);
-    deviceIds[deviceCount][39] = 0;
-    deviceCount++;
-    saveDevices();
-    Serial.print(F("[nappi] new device #")); Serial.print(deviceCount);
-    Serial.print(F(" ")); Serial.println(cid);
-    return deviceCount;
-  }
-  return 0;
-}
-
-// ---------- HTTP helpers ----------
-bool authOK(const char* hdr, bool adminAlso) {
-  if (strcmp(hdr, AUTH_CLIENT) == 0) return true;
-  if (adminAlso && strcmp(hdr, AUTH_ADMIN) == 0) return true;
-  return false;
-}
-
+// ---------- HTTP response helpers ----------
 void send401(WiFiClient& c) {
   c.print(F("HTTP/1.1 401 Unauthorized\r\n"
             "WWW-Authenticate: Basic realm=\"rootaika\"\r\n"
             "Content-Type: text/plain\r\nConnection: close\r\n\r\nunauthorized"));
+  c.flush(); c.stop();
+}
+void send403(WiFiClient& c) {
+  c.print(F("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\nforbidden"));
   c.flush(); c.stop();
 }
 void send405(WiFiClient& c) {
@@ -170,14 +118,25 @@ void sendApiError(WiFiClient& c, int status, const char* msg) {
   c.print(F("{\"error\":\"")); c.print(msg); c.print(F("\"}"));
   c.flush(); c.stop();
 }
+// 303 redirect back to the settings page after an admin POST (PRG pattern).
+void sendRedirect(WiFiClient& c, const char* loc) {
+  c.print(F("HTTP/1.1 303 See Other\r\nLocation: "));
+  c.print(loc);
+  c.print(F("\r\nConnection: close\r\n\r\n"));
+  c.flush(); c.stop();
+}
 
-// Extract a query parameter value from a full path like /x?client_id=abc&status=active
+// ---------- query / form parsing ----------
+// getParam extracts a query parameter value from a path like /x?client_id=abc.
 bool getParam(const char* path, const char* key, char* out, int outsz) {
   const char* q = strchr(path, '?');
   if (!q) return false;
   char needle[40];
   snprintf(needle, sizeof(needle), "%s=", key);
   const char* p = strstr(q, needle);
+  // ensure the match begins right after '?' or '&', not mid-token
+  while (p && p != q + 1 && *(p - 1) != '&' && *(p - 1) != '?')
+    p = strstr(p + 1, needle);
   if (!p) return false;
   p += strlen(needle);
   int i = 0;
@@ -186,29 +145,110 @@ bool getParam(const char* path, const char* key, char* out, int outsz) {
   return true;
 }
 
-// ---------- endpoint: GET /api/v1/client/config ----------
+// urlDecode decodes %XX and + from in into out.
+void urlDecode(const char* in, char* out, int outsz) {
+  int o = 0;
+  for (const char* p = in; *p && o < outsz - 1; p++) {
+    if (*p == '+') out[o++] = ' ';
+    else if (*p == '%' && p[1] && p[2]) {
+      auto hex = [](char ch) -> int {
+        if (ch >= '0' && ch <= '9') return ch - '0';
+        if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+        if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+        return -1;
+      };
+      int hi = hex(p[1]), lo = hex(p[2]);
+      if (hi >= 0 && lo >= 0) { out[o++] = (char)(hi * 16 + lo); p += 2; }
+      else out[o++] = *p;
+    } else out[o++] = *p;
+  }
+  out[o] = 0;
+}
+
+// formField pulls key from a urlencoded body and URL-decodes it into out.
+bool formField(const char* body, const char* key, char* out, int outsz) {
+  char needle[40];
+  snprintf(needle, sizeof(needle), "%s=", key);
+  const char* p = strstr(body, needle);
+  while (p && p != body && *(p - 1) != '&')
+    p = strstr(p + 1, needle);
+  if (!p) { out[0] = 0; return false; }
+  p += strlen(needle);
+  char raw[256];
+  int i = 0;
+  while (*p && *p != '&' && i < (int)sizeof(raw) - 1) raw[i++] = *p++;
+  raw[i] = 0;
+  urlDecode(raw, out, outsz);
+  return true;
+}
+
+int formInt(const char* body, const char* key, int fallback) {
+  char buf[32];
+  if (!formField(body, key, buf, sizeof(buf))) return fallback;
+  char* end;
+  long v = strtol(buf, &end, 10);
+  if (end == buf) return fallback;
+  return (int)v;
+}
+
+bool formCheckbox(const char* body, const char* key) {
+  char buf[16];
+  if (!formField(body, key, buf, sizeof(buf))) return false;
+  return !strcmp(buf, "on") || !strcmp(buf, "1") || !strcmp(buf, "true") || !strcmp(buf, "yes");
+}
+
+// ---------- auth ----------
+bool authIsClientOrAdmin(const char* hdr) {
+  return strcmp(hdr, AUTH_CLIENT) == 0 || strcmp(hdr, AUTH_ADMIN) == 0;
+}
+bool authIsAdmin(const char* hdr) {
+  return strcmp(hdr, AUTH_ADMIN) == 0;
+}
+
+// ===================== API endpoints =====================
+
 void handleClientConfig(WiFiClient& c, const char* path) {
   char clientId[40] = "";
   getParam(path, "client_id", clientId, sizeof(clientId));
-  // Register the device so it shows up even before it sends events.
-  if (clientId[0]) deviceIdFor(clientId);
+  if (clientId[0] == 0) { sendApiError(c, 400, "client_id is required"); return; }
+
+  Device* d = ensureDevice(clientId);
+  if (!d) { sendApiError(c, 400, "device table full"); return; }
+
+  // The client reports its own state in the same poll; record it if valid.
+  char status[12] = "";
+  if (getParam(path, "status", status, sizeof(status))) {
+    if (!strcmp(status, "active") || !strcmp(status, "idle") || !strcmp(status, "locked"))
+      recordDeviceStatus(d, status);
+  }
+
+  char ver[20]; configVersionFor(*d, ver, sizeof(ver));
+  char sv[16];  soundVersionStr(sv, sizeof(sv));
 
   sendJsonHead(c, 200);
-  c.print(F("{\"client_id\":\"")); c.print(clientId);
-  c.print(F("\",\"config_version\":\"")); c.print(g_configVersion);
-  c.print(F("\",\"idle_threshold_seconds\":")); c.print(CFG_IDLE_THRESHOLD);
-  c.print(F(",\"upload_interval_seconds\":")); c.print(CFG_UPLOAD_INTERVAL);
-  c.print(F(",\"poll_interval_seconds\":")); c.print(CFG_POLL_INTERVAL);
-  c.print(F(",\"max_countable_gap_seconds\":")); c.print(CFG_MAX_GAP);
-  c.print(F(",\"debug_mode\":false"));
-  c.print(F(",\"locked\":")); c.print(g_locked ? F("true") : F("false"));
-  c.print(F(",\"lock_message\":\"")); c.print(g_locked ? g_lockMessage : "");
-  c.print(F("\",\"warning_seconds\":")); c.print(CFG_WARNING_SECONDS);
-  c.print(F(",\"categories\":[]}"));
+  c.print(F("{\"client_id\":\"")); jsonEscape(c, clientId);
+  c.print(F("\",\"config_version\":\"")); c.print(ver);
+  c.print(F("\",\"idle_threshold_seconds\":")); c.print(d->idle);
+  c.print(F(",\"upload_interval_seconds\":")); c.print(d->upload);
+  c.print(F(",\"poll_interval_seconds\":")); c.print(d->poll);
+  c.print(F(",\"max_countable_gap_seconds\":")); c.print(g_settings.maxGap);
+  c.print(F(",\"debug_mode\":")); c.print(debugFor(*d) ? F("true") : F("false"));
+  c.print(F(",\"locked\":")); c.print(d->locked ? F("true") : F("false"));
+  c.print(F(",\"lock_message\":\"")); if (d->locked) jsonEscape(c, d->lockMsg);
+  c.print(F("\",\"warning_seconds\":")); c.print(d->locked ? d->warnSeconds : 0);
+  c.print(F(",\"warning_sound_version\":\"")); c.print(sv);
+  c.print(F("\",\"categories\":["));
+  for (int i = 0; i < g_categoryCount; i++) {
+    if (i) c.print(',');
+    c.print(F("{\"match_type\":\"")); jsonEscape(c, g_categories[i].type);
+    c.print(F("\",\"pattern\":\"")); jsonEscape(c, g_categories[i].pattern);
+    c.print(F("\",\"category\":\"")); jsonEscape(c, g_categories[i].cat);
+    c.print(F("\"}"));
+  }
+  c.print(F("]}"));
   c.flush(); c.stop();
 }
 
-// ---------- endpoint: POST /api/v1/events/batch ----------
 void handleEventsBatch(WiFiClient& c, const char* body, int bodyLen) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, body, bodyLen);
@@ -219,7 +259,9 @@ void handleEventsBatch(WiFiClient& c, const char* body, int bodyLen) {
   JsonArray events = doc["events"].as<JsonArray>();
   if (events.isNull() || events.size() == 0) { sendApiError(c, 400, "events is required"); return; }
 
-  int devId = deviceIdFor(clientId);
+  Device* d = ensureDevice(clientId);
+  if (!d) { sendApiError(c, 400, "device table full"); return; }
+  int devId = d->id;
   int accepted = 0;
 
   File f = LittleFS.open("/events.jsonl", "a");
@@ -233,20 +275,24 @@ void handleEventsBatch(WiFiClient& c, const char* body, int bodyLen) {
     if (eventId[0] == 0 || occ[0] == 0) continue;
     if (strcmp(type, "activity_observed") != 0) continue;
     if (strcmp(state, "active") && strcmp(state, "idle") && strcmp(state, "locked")) continue;
+    if (seenEventId(eventId)) continue;       // idempotent re-send: drop duplicates
     if (strcmp(state, "active") == 0 && proc[0] == 0) proc = "unknown";
+    if (strcmp(state, "active") != 0) proc = "";
     if (f) {
-      // compact JSONL line: device,event_id,occurred_at,state,process,sequence
       f.print(F("{\"d\":")); f.print(devId);
-      f.print(F(",\"id\":\"")); f.print(eventId);
-      f.print(F("\",\"t\":\"")); f.print(occ);
-      f.print(F("\",\"s\":\"")); f.print(state);
-      f.print(F("\",\"p\":\"")); f.print(proc);
+      f.print(F(",\"id\":\"")); jsonEscape(f, eventId);
+      f.print(F("\",\"t\":\"")); jsonEscape(f, occ);
+      f.print(F("\",\"s\":\"")); jsonEscape(f, state);
+      f.print(F("\",\"p\":\"")); jsonEscape(f, proc);
       f.print(F("\",\"seq\":")); f.print(seq);
       f.println(F("}"));
     }
+    rememberEventId(eventId);
+    updateDeviceLastSeen(d, occ);
     accepted++;
   }
   if (f) f.close();
+  if (accepted) saveDevices();   // persist updated lastSeen
 
   sendJsonHead(c, 200);
   c.print(F("{\"accepted\":")); c.print(accepted);
@@ -256,115 +302,233 @@ void handleEventsBatch(WiFiClient& c, const char* body, int bodyLen) {
   c.flush(); c.stop();
 }
 
-// ---------- endpoint: GET /api/v1/lock (compat status) ----------
-void handleLockStatus(WiFiClient& c) {
-  sendJsonHead(c, 200);
-  c.print(F("{\"locked\":")); c.print(g_locked ? F("true") : F("false"));
-  c.print(F(",\"locked_count\":")); c.print(g_locked ? deviceCount : 0);
-  c.print(F(",\"total_count\":")); c.print(deviceCount);
-  c.print(F("}"));
-  c.flush(); c.stop();
-}
-
-// ---------- endpoint: POST /api/v1/lock (toggle all) / POST /api/v1/unlock ----------
-void handleLockToggle(WiFiClient& c) {
-  setLock(!g_locked);
-  sendJsonHead(c, 200);
-  c.print(F("{\"locked\":")); c.print(g_locked ? F("true") : F("false"));
-  c.print(F(",\"affected\":")); c.print(deviceCount);
-  c.print(F("}"));
-  c.flush(); c.stop();
-}
-void handleUnlock(WiFiClient& c) {
-  setLock(false);
-  sendJsonHead(c, 200);
-  c.print(F("{\"locked\":false,\"affected\":")); c.print(deviceCount); c.print(F("}"));
-  c.flush(); c.stop();
-}
-
-// ---------- usage computation from the event log ----------
-// Parse RFC3339 "YYYY-MM-DDTHH:MM:SS..." -> Unix epoch seconds (UTC). -1 on fail.
-long epochFromRFC3339(const char* s) {
-  int Y, Mo, D, h, mi, se;
-  if (sscanf(s, "%4d-%2d-%2dT%2d:%2d:%2d", &Y, &Mo, &D, &h, &mi, &se) != 6) return -1;
-  int y = Y - (Mo <= 2);
-  long era = (y >= 0 ? y : y - 399) / 400;
-  unsigned yoe = (unsigned)(y - era * 400);
-  unsigned doy = (153 * (Mo + (Mo > 2 ? -3 : 9)) + 2) / 5 + D - 1;
-  unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-  long days = era * 146097 + (long)doe - 719468;
-  return days * 86400L + h * 3600L + mi * 60L + se;
-}
-
-// Active seconds per device for "today" (= date of the newest event in the log).
-// Attributes each gap after an 'active' event to that device, capped at CFG_MAX_GAP.
-// maxDate[11] receives the day used (YYYY-MM-DD), empty if no events.
-void computeTodaySeconds(long sec[], char* maxDate) {
-  for (int i = 0; i <= MAX_DEVICES; i++) sec[i] = 0;
-  maxDate[0] = 0;
-
-  File f = LittleFS.open("/events.jsonl", "r");
-  if (!f) return;
-  // pass 1: newest date present
+void handleWarningSound(WiFiClient& c) {
+  if (g_settings.soundVer <= 0 || !LittleFS.exists("/warning.mp3")) {
+    c.print(F("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n"));
+    c.flush(); c.stop();
+    return;
+  }
+  File f = LittleFS.open("/warning.mp3", "r");
+  if (!f) { c.print(F("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")); c.flush(); c.stop(); return; }
+  c.print(F("HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nETag: \""));
+  c.print(g_settings.soundVer);
+  c.print(F("\"\r\nContent-Length: "));
+  c.print((long)f.size());
+  c.print(F("\r\nConnection: close\r\n\r\n"));
+  uint8_t buf[512];
   while (f.available()) {
-    String ln = f.readStringUntil('\n');
-    const char* t = strstr(ln.c_str(), "\"t\":\"");
-    if (!t) continue;
-    char date[11]; strncpy(date, t + 5, 10); date[10] = 0;
-    if (strcmp(date, maxDate) > 0) strcpy(maxDate, date);
+    int n = f.read(buf, sizeof(buf));
+    if (n <= 0) break;
+    c.write(buf, n);
   }
   f.close();
-  if (maxDate[0] == 0) return;
-
-  // pass 2: sum capped active gaps within maxDate, per device
-  long lastEpoch[MAX_DEVICES + 1];
-  bool lastActive[MAX_DEVICES + 1], lastOnDay[MAX_DEVICES + 1];
-  for (int i = 0; i <= MAX_DEVICES; i++) { lastEpoch[i] = -1; lastActive[i] = false; lastOnDay[i] = false; }
-
-  f = LittleFS.open("/events.jsonl", "r");
-  while (f.available()) {
-    String ln = f.readStringUntil('\n');
-    const char* p = ln.c_str();
-    const char* pd = strstr(p, "\"d\":");
-    const char* pt = strstr(p, "\"t\":\"");
-    const char* ps = strstr(p, "\"s\":\"");
-    if (!pd || !pt || !ps) continue;
-    int dev = atoi(pd + 4);
-    if (dev < 1 || dev > MAX_DEVICES) continue;
-    const char* tt = pt + 5;
-    bool onDay = (strncmp(tt, maxDate, 10) == 0);
-    long ep = epochFromRFC3339(tt);
-    bool active = (*(ps + 5) == 'a');
-    if (lastEpoch[dev] >= 0 && lastActive[dev] && lastOnDay[dev] && onDay && ep >= 0) {
-      long gap = ep - lastEpoch[dev];
-      if (gap > 0) { if (gap > CFG_MAX_GAP) gap = CFG_MAX_GAP; sec[dev] += gap; }
-    }
-    lastEpoch[dev] = ep; lastActive[dev] = active; lastOnDay[dev] = onDay;
-  }
-  f.close();
+  c.flush(); c.stop();
 }
 
-// ---------- endpoint: GET /api/v1/board/today ----------
 void handleBoardToday(WiFiClient& c) {
-  long sec[MAX_DEVICES + 1]; char maxDate[11];
+  long sec[MAX_DEVICES]; char maxDate[11];
   computeTodaySeconds(sec, maxDate);
   sendJsonHead(c, 200);
   c.print(F("{\"now\":\"")); c.print(maxDate);
-  c.print(F("\",\"refresh_seconds\":30,\"devices\":["));
-  for (int i = 0; i < deviceCount; i++) {
+  c.print(F("\",\"refresh_seconds\":")); c.print(g_settings.boardRefresh);
+  c.print(F(",\"devices\":["));
+  for (int i = 0; i < g_deviceCount; i++) {
     if (i) c.print(',');
-    int minutes = (int)((sec[i + 1] + 30) / 60);
-    c.print(F("{\"name\":\"")); c.print(deviceIds[i]);
+    int minutes = (int)((sec[i] + 30) / 60);
+    c.print(F("{\"name\":\"")); jsonEscape(c, g_devices[i].name);
     c.print(F("\",\"minutes\":")); c.print(minutes); c.print(F("}"));
   }
   c.print(F("]}"));
   c.flush(); c.stop();
 }
 
-// ---------- root page ----------
+void handleLockStatus(WiFiClient& c) {
+  bool locked; int lc, tc;
+  globalLockState(&locked, &lc, &tc);
+  sendJsonHead(c, 200);
+  c.print(F("{\"locked\":")); c.print(locked ? F("true") : F("false"));
+  c.print(F(",\"locked_count\":")); c.print(lc);
+  c.print(F(",\"total_count\":")); c.print(tc);
+  c.print(F("}"));
+  c.flush(); c.stop();
+}
+
+void handleLockToggle(WiFiClient& c) {
+  int affected = 0;
+  bool locked = toggleAllLocks(g_buttonMessage, &affected);
+  applyLockLed();
+  sendJsonHead(c, 200);
+  c.print(F("{\"locked\":")); c.print(locked ? F("true") : F("false"));
+  c.print(F(",\"affected\":")); c.print(affected);
+  c.print(F("}"));
+  c.flush(); c.stop();
+}
+
+void handleUnlock(WiFiClient& c) {
+  int affected = unlockAllLocks();
+  applyLockLed();
+  sendJsonHead(c, 200);
+  c.print(F("{\"locked\":false,\"affected\":")); c.print(affected); c.print(F("}"));
+  c.flush(); c.stop();
+}
+
+// ===================== admin POST handlers =====================
+// Each takes the already-read urlencoded body and 303-redirects to /settings.
+
+void adminSettings(WiFiClient& c, const char* body) {
+  Settings s;
+  s.idle         = formInt(body, "idle_threshold_seconds", 0);
+  s.upload       = formInt(body, "upload_interval_seconds", 0);
+  s.poll         = formInt(body, "poll_interval_seconds", 0);
+  s.maxGap       = formInt(body, "max_countable_gap_seconds", 0);
+  s.chartYMax    = formInt(body, "chart_y_max_minutes", 0);
+  s.boardRefresh = formInt(body, "board_refresh_seconds", 0);
+  if (s.idle <= 0 || s.upload <= 0 || s.poll <= 0 || s.maxGap <= 0 || s.chartYMax <= 0 || s.boardRefresh <= 0) {
+    sendApiError(c, 400, "settings must be positive integers");
+    return;
+  }
+  s.debug = formCheckbox(body, "debug_mode");
+  s.debugUnassigned = formCheckbox(body, "debug_unassigned_clients");
+  updateSettings(s);
+  sendRedirect(c, "/settings#settings");
+}
+
+void adminCreateUser(WiFiClient& c, const char* body) {
+  char name[40]; formField(body, "name", name, sizeof(name));
+  if (name[0]) createUser(name);
+  sendRedirect(c, "/settings#users");
+}
+
+void adminRenameUser(WiFiClient& c, int id, const char* body) {
+  char name[40]; formField(body, "name", name, sizeof(name));
+  renameUser(id, name);
+  sendRedirect(c, "/settings#users");
+}
+
+void adminAssignDevice(WiFiClient& c, int id, const char* body) {
+  char name[40]; formField(body, "display_name", name, sizeof(name));
+  int userId = formInt(body, "user_id", 0);
+  updateDevice(id, name, userId);
+  applyLockLed();
+  sendRedirect(c, "/settings#devices");
+}
+
+void adminDeviceLock(WiFiClient& c, int id, const char* body) {
+  char msg[64]; formField(body, "message", msg, sizeof(msg));
+  int warn = formInt(body, "warning_seconds", 0);
+  if (warn < 0) warn = 0;
+  if (warn > 600) warn = 600;
+  setDeviceLock(id, true, msg, warn);
+  applyLockLed();
+  sendRedirect(c, "/settings#devices");
+}
+
+void adminDeviceUnlock(WiFiClient& c, int id) {
+  setDeviceLock(id, false, "", 0);
+  applyLockLed();
+  sendRedirect(c, "/settings#devices");
+}
+
+void adminDeviceDelete(WiFiClient& c, int id) {
+  deleteDevice(id);
+  applyLockLed();
+  sendRedirect(c, "/settings#devices");
+}
+
+void adminCreateCategory(WiFiClient& c, const char* body) {
+  char type[16], pat[64], cat[40];
+  formField(body, "match_type", type, sizeof(type));
+  formField(body, "pattern", pat, sizeof(pat));
+  formField(body, "category", cat, sizeof(cat));
+  createCategory(type, pat, cat);
+  sendRedirect(c, "/settings#categories");
+}
+
+void adminDeleteCategory(WiFiClient& c, int id) {
+  deleteCategory(id);
+  sendRedirect(c, "/settings#categories");
+}
+
+// ---------- multipart MP3 upload (streamed to LittleFS) ----------
+// The body is far larger than g_body, so this reads the socket directly: skip the
+// multipart preamble through the blank line after the part headers, then write
+// bytes to /warning.mp3 until the closing boundary. A held-back window of the
+// last delimLen bytes lets a boundary that spans two reads still be detected.
+void handleWarningSoundUpload(WiFiClient& c, const char* contentType, long contentLength) {
+  const char* b = strstr(contentType, "boundary=");
+  if (!b) { sendApiError(c, 400, "no boundary"); return; }
+  b += 9;
+  char boundary[80];
+  int bi = 0;
+  if (*b == '"') b++;
+  while (*b && *b != '"' && *b != ';' && bi < (int)sizeof(boundary) - 1) boundary[bi++] = *b++;
+  boundary[bi] = 0;
+  // the file part is terminated by CRLF + "--" + boundary
+  char delim[88];
+  snprintf(delim, sizeof(delim), "\r\n--%s", boundary);
+  int delimLen = strlen(delim);
+  if (delimLen >= 96) { sendApiError(c, 400, "boundary too long"); return; }
+
+  File out = LittleFS.open("/warning.mp3.tmp", "w");
+  if (!out) { sendApiError(c, 500, "fs open failed"); return; }
+
+  long remaining = contentLength;
+  uint32_t t0 = millis();
+
+  // Phase 1: skip part headers, i.e. read up to and including "\r\n\r\n".
+  int hdrMatch = 0;
+  const char* hdrSeq = "\r\n\r\n";
+  bool headersDone = false;
+  while (remaining > 0 && millis() - t0 < 15000) {
+    if (!c.available()) { updateButton(); continue; }
+    char ch = c.read(); remaining--;
+    if (ch == hdrSeq[hdrMatch]) { hdrMatch++; if (hdrMatch == 4) { headersDone = true; break; } }
+    else hdrMatch = (ch == '\r') ? 1 : 0;
+  }
+  if (!headersDone) { out.close(); LittleFS.remove("/warning.mp3.tmp"); sendApiError(c, 400, "malformed multipart"); return; }
+
+  // Phase 2: stream the file body, watching for the closing delimiter.
+  char window[96];
+  int winLen = 0;
+  long written = 0;
+  bool foundDelim = false;
+  t0 = millis();
+  while (remaining > 0 && millis() - t0 < 30000) {
+    if (!c.available()) { updateButton(); continue; }
+    char ch = c.read(); remaining--;
+    t0 = millis();
+    window[winLen++] = ch;
+    if (winLen == delimLen) {
+      if (memcmp(window, delim, delimLen) == 0) { foundDelim = true; break; }
+      out.write((uint8_t)window[0]);     // confirmed non-delimiter: flush oldest byte
+      written++;
+      memmove(window, window + 1, --winLen);
+    }
+    if (written > maxWarningSoundBytesRP) {
+      out.close(); LittleFS.remove("/warning.mp3.tmp");
+      sendApiError(c, 400, "file too large");
+      return;
+    }
+  }
+  out.close();
+
+  if (!foundDelim || written == 0) {
+    LittleFS.remove("/warning.mp3.tmp");
+    sendApiError(c, 400, foundDelim ? "empty file" : "upload truncated");
+    return;
+  }
+  LittleFS.remove("/warning.mp3");
+  LittleFS.rename("/warning.mp3.tmp", "/warning.mp3");
+  bumpSoundVersion();
+  sendRedirect(c, "/settings#settings");
+}
+
+// ===================== dashboard (live status) =====================
 void sendRootPage(WiFiClient& c) {
-  long sec[MAX_DEVICES + 1]; char maxDate[11];
+  long sec[MAX_DEVICES]; char maxDate[11];
   computeTodaySeconds(sec, maxDate);
+  bool locked; int lc, tc;
+  globalLockState(&locked, &lc, &tc);
 
   c.print(F("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n"));
   c.print(F("<!doctype html><html lang=fi><head><meta charset=utf-8>"
@@ -372,6 +536,7 @@ void sendRootPage(WiFiClient& c) {
             "<meta http-equiv=refresh content=10><title>ruutuaika</title><style>"
             "body{font-family:system-ui;background:#0f172a;color:#e2e8f0;margin:0;padding:2rem}"
             "h1{font-size:1.4rem;margin:0 0 .3rem}.sub{opacity:.6;font-size:.85rem;margin-bottom:1.5rem}"
+            "a{color:#5eead4}"
             ".lock{display:inline-block;padding:.2rem .7rem;border-radius:.5rem;font-weight:700}"
             ".on{background:#dc2626}.off{background:#16a34a}"
             "table{width:100%;border-collapse:collapse;max-width:640px}"
@@ -381,36 +546,74 @@ void sendRootPage(WiFiClient& c) {
             ".name{font-family:ui-monospace,monospace;font-size:.8rem;opacity:.85}"
             "</style></head><body>"));
   c.print(F("<h1>ruutuaika <span class='lock "));
-  c.print(g_locked ? F("on'>LUKITTU") : F("off'>auki"));
+  c.print(locked ? F("on'>LUKITTU") : F("off'>auki"));
   c.print(F("</span></h1><div class=sub>"));
-  c.print(deviceCount); c.print(F(" laitetta · päivä "));
-  c.print(maxDate[0] ? maxDate : "—");
-  c.print(F("</div><table><tr><th>laite</th><th style=text-align:right>tänään</th></tr>"));
-  for (int i = 0; i < deviceCount; i++) {
-    int minutes = (int)((sec[i + 1] + 30) / 60);
-    c.print(F("<tr><td class=name>")); c.print(deviceIds[i]);
+  c.print(g_deviceCount); c.print(F(" laitetta \xC2\xB7 p\xC3\xA4iv\xC3\xA4 "));
+  c.print(maxDate[0] ? maxDate : "\xE2\x80\x94");
+  c.print(F(" \xC2\xB7 <a href='/settings'>Asetukset</a>"));
+  c.print(F("</div><table><tr><th>laite</th><th style=text-align:right>t\xC3\xA4n\xC3\xA4\xC3\xA4n</th></tr>"));
+  for (int i = 0; i < g_deviceCount; i++) {
+    int minutes = (int)((sec[i] + 30) / 60);
+    c.print(F("<tr><td class=name>")); htmlEscape(c, g_devices[i].name);
     c.print(F("</td><td class=min>")); c.print(minutes); c.print(F("<span style='font-size:.7rem;opacity:.5'> min</span></td></tr>"));
   }
-  if (deviceCount == 0) c.print(F("<tr><td colspan=2 style=opacity:.5>ei laitteita vielä</td></tr>"));
+  if (g_deviceCount == 0) c.print(F("<tr><td colspan=2 style=opacity:.5>ei laitteita viel\xC3\xA4</td></tr>"));
   c.print(F("</table></body></html>"));
   c.flush(); c.stop();
 }
 
-// ---------- request parser + router ----------
+// ===================== request parser + router =====================
 char g_body[8192];
 
+// pathStarts matches a route prefix followed by end-of-path, '/', or '?'.
+bool pathStarts(const char* path, const char* prefix) {
+  int n = strlen(prefix);
+  if (strncmp(path, prefix, n) != 0) return false;
+  char after = path[n];
+  return after == 0 || after == '/' || after == '?';
+}
+
+// routeAdmin dispatches POST /admin/* using the urlencoded body already read.
+void routeAdmin(WiFiClient& c, const char* path, const char* body) {
+  const char* p = path + 7;          // strip "/admin/"
+  char seg0[24] = "", seg2[24] = "";
+  int id = 0;
+  int i = 0; while (p[i] && p[i] != '/' && p[i] != '?' && i < 23) { seg0[i] = p[i]; i++; } seg0[i] = 0;
+  const char* rest = p + i;
+  if (*rest == '/') {
+    rest++;
+    id = atoi(rest);
+    while (*rest && *rest != '/') rest++;
+    if (*rest == '/') { rest++; int j = 0; while (*rest && *rest != '/' && *rest != '?' && j < 23) { seg2[j] = *rest; rest++; j++; } seg2[j] = 0; }
+  }
+
+  if (!strcmp(seg0, "settings") && seg2[0] == 0)                         { adminSettings(c, body); return; }
+  if (!strcmp(seg0, "users") && id == 0)                                 { adminCreateUser(c, body); return; }
+  if (!strcmp(seg0, "users") && id > 0 && !strcmp(seg2, "rename"))       { adminRenameUser(c, id, body); return; }
+  if (!strcmp(seg0, "devices") && id > 0 && !strcmp(seg2, "assign"))     { adminAssignDevice(c, id, body); return; }
+  if (!strcmp(seg0, "devices") && id > 0 && !strcmp(seg2, "lock"))       { adminDeviceLock(c, id, body); return; }
+  if (!strcmp(seg0, "devices") && id > 0 && !strcmp(seg2, "unlock"))     { adminDeviceUnlock(c, id); return; }
+  if (!strcmp(seg0, "devices") && id > 0 && !strcmp(seg2, "delete"))     { adminDeviceDelete(c, id); return; }
+  if (!strcmp(seg0, "categories") && id == 0)                           { adminCreateCategory(c, body); return; }
+  if (!strcmp(seg0, "categories") && id > 0 && !strcmp(seg2, "delete"))  { adminDeleteCategory(c, id); return; }
+
+  c.print(F("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n"));
+  c.flush(); c.stop();
+}
+
 void handleClient(WiFiClient& client) {
-  char line[200];
+  char line[300];
   int  len = 0;
   bool firstLine = true;
   char method[8] = "";
-  char path[220] = "/";
-  char authHdr[64] = "";
+  char path[260] = "/";
+  char authHdr[80] = "";
+  char contentType[120] = "";
   long contentLength = 0;
   bool headersDone = false;
   uint32_t start = millis();
 
-  while (client.connected() && millis() - start < 1200) {   // short: free stalled/speculative links fast
+  while (client.connected() && millis() - start < 1500) {
     if (client.available()) {
       char ch = client.read();
       if (ch == '\r') continue;
@@ -437,6 +640,9 @@ void handleClient(WiFiClient& client) {
             strncpy(authHdr, v, sizeof(authHdr) - 1);
           } else if (strncasecmp(line, "Content-Length:", 15) == 0) {
             contentLength = atol(line + 15);
+          } else if (strncasecmp(line, "Content-Type:", 13) == 0) {
+            char* v = line + 13; while (*v == ' ') v++;
+            strncpy(contentType, v, sizeof(contentType) - 1);
           }
         }
         len = 0;
@@ -449,39 +655,64 @@ void handleClient(WiFiClient& client) {
   }
   if (!headersDone) { client.stop(); return; }
 
-  // read body (POST)
+  bool isGet  = strcmp(method, "GET") == 0;
+  bool isPost = strcmp(method, "POST") == 0;
+  bool isMultipart = strncasecmp(contentType, "multipart/form-data", 19) == 0;
+
+  bool apiPath      = strncmp(path, "/api/v1/", 8) == 0;
+  bool adminPath    = strncmp(path, "/admin/", 7) == 0;
+  bool settingsPath = pathStarts(path, "/settings");
+
+  // ---- auth gating by route ----
+  if (apiPath || settingsPath) {
+    if (!authIsClientOrAdmin(authHdr)) { send401(client); return; }
+  } else if (adminPath) {
+    if (!authIsClientOrAdmin(authHdr)) { send401(client); return; }
+    if (!authIsAdmin(authHdr)) { send403(client); return; }   // mutations require admin
+  }
+
+  // ---- multipart upload streams straight from the socket (bypasses g_body) ----
+  if (adminPath && isPost && isMultipart) {
+    if (pathStarts(path, "/admin/settings/warning-sound"))
+      handleWarningSoundUpload(client, contentType, contentLength);
+    else { client.print(F("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")); client.flush(); client.stop(); }
+    return;
+  }
+
+  // ---- read body for non-multipart POSTs ----
   int bodyLen = 0;
   if (contentLength > 0) {
     long n = contentLength;
     if (n > (long)sizeof(g_body) - 1) { sendApiError(client, 400, "body too large"); return; }
     uint32_t t0 = millis();
-    while (bodyLen < n && client.connected() && millis() - t0 < 2500) {
+    while (bodyLen < n && client.connected() && millis() - t0 < 4000) {
       if (client.available()) g_body[bodyLen++] = client.read();
       else updateButton();
     }
     g_body[bodyLen] = 0;
+  } else {
+    g_body[0] = 0;
   }
 
-  bool isGet  = strcmp(method, "GET") == 0;
-  bool isPost = strcmp(method, "POST") == 0;
-
-  // auth gate for the API
-  if (strncmp(path, "/api/v1/", 8) == 0) {
-    if (!authOK(authHdr, true)) { send401(client); return; }
-  }
-
-  if (strncmp(path, "/api/v1/events/batch", 20) == 0) {
+  // ---- routing ----
+  if (pathStarts(path, "/api/v1/events/batch")) {
     if (isPost) handleEventsBatch(client, g_body, bodyLen); else send405(client);
-  } else if (strncmp(path, "/api/v1/client/config", 21) == 0) {
+  } else if (pathStarts(path, "/api/v1/client/config")) {
     if (isGet) handleClientConfig(client, path); else send405(client);
-  } else if (strncmp(path, "/api/v1/board/today", 19) == 0) {
+  } else if (pathStarts(path, "/api/v1/warning-sound")) {
+    if (isGet) handleWarningSound(client); else send405(client);
+  } else if (pathStarts(path, "/api/v1/board/today")) {
     if (isGet) handleBoardToday(client); else send405(client);
-  } else if (strncmp(path, "/api/v1/unlock", 14) == 0) {
+  } else if (pathStarts(path, "/api/v1/unlock")) {
     if (isPost) handleUnlock(client); else send405(client);
-  } else if (strncmp(path, "/api/v1/lock", 12) == 0) {
+  } else if (pathStarts(path, "/api/v1/lock")) {
     if (isGet) handleLockStatus(client);
     else if (isPost) handleLockToggle(client);
     else send405(client);
+  } else if (settingsPath) {
+    if (isGet) renderSettingsPage(client, authIsAdmin(authHdr)); else send405(client);
+  } else if (adminPath) {
+    if (isPost) routeAdmin(client, path, g_body); else send405(client);
   } else if (strncmp(path, "/favicon", 8) == 0) {
     client.print(F("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"));
     client.flush(); client.stop();
@@ -508,8 +739,10 @@ void setup() {
     LittleFS.format();
     LittleFS.begin();
   }
-  loadDevices();
-  Serial.print(F("[nappi] devices loaded: ")); Serial.println(deviceCount);
+  storageBegin();
+  Serial.print(F("[nappi] devices=")); Serial.print(g_deviceCount);
+  Serial.print(F(" users=")); Serial.print(g_userCount);
+  Serial.print(F(" categories=")); Serial.println(g_categoryCount);
   applyLockLed();
 
   Serial2.begin(115200);
@@ -527,7 +760,7 @@ void setup() {
     Serial.print(F("[nappi] connected, IP: ")); Serial.println(WiFi.localIP());
     if (WiFi.startMDNS(HOSTNAME, "http", 80))
       Serial.println(F("[nappi] mDNS -> http://nappi.local/"));
-    server.begin(5, 3);   // use all 5 ESP-AT links, 3s idle timeout (board makes no outgoing conns)
+    server.begin(5, 3);
     Serial.println(F("[nappi] rootaika server on :80"));
   } else {
     Serial.println(F("[nappi] WiFi FAILED - check SSID/password"));
@@ -538,15 +771,16 @@ void loop() {
   updateButton();
   digitalWrite(LED_BUILTIN, buttonPressed ? HIGH : LOW);
 
-  // physical button: short press = lock all, hold >=1s = unlock all
+  // physical button: short press = lock all assigned, hold >=1s = unlock all
   if (buttonPressed && !prevPressed) {
     pressStartMs = millis();
     longFired = false;
   } else if (buttonPressed && !longFired && millis() - pressStartMs >= LONG_PRESS_MS) {
-    setLock(false);            // unlock
+    unlockAllLocks();
+    applyLockLed();
     longFired = true;
   } else if (!buttonPressed && prevPressed) {
-    if (!longFired) setLock(true);   // lock
+    if (!longFired) { lockAllAssigned(g_buttonMessage); applyLockLed(); }
   }
   prevPressed = buttonPressed;
 
