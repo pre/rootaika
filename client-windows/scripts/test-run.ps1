@@ -31,7 +31,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # --- Hard-coded test configuration ---
-$ServerUrl      = "http://192.168.68.126:8080"
+$ServerUrl      = "http://192.168.68.111:8080"
 $ClientUsername = "client"
 $ClientPassword = "client"
 # -------------------------------------
