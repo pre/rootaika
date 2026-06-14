@@ -17,8 +17,10 @@
 #   make build VERBOSE=1             pass --verbose to arduino-cli
 
 SKETCH    := RootaikaServer
-FLASH     := 8388608            # total flash addressed by the layout (8 MB, see README)
-FS        := 4194304            # LittleFS partition size in bytes (4 MB, see README)
+# Total flash addressed by the layout (8 MB, see README).
+FLASH     := 8388608
+# LittleFS partition size in bytes (4 MB, see README).
+FS        := 4194304
 FQBN      := rp2040:rp2040:challenger_2040_wifi:flash=$(FLASH)_$(FS)
 BUILD_DIR := build
 
