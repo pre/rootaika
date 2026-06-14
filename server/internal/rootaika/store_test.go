@@ -2,6 +2,7 @@ package rootaika
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -18,6 +19,36 @@ func testStore(t *testing.T) *Store {
 
 func fixedNow() time.Time {
 	return time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+}
+
+// TestStoreDSNCarriesPerConnectionPragmas guards the fix for the admin
+// lock/unlock "authentication failed" bug. busy_timeout and foreign_keys are
+// per-connection state in SQLite, so they must travel on the DSN to apply to
+// every pooled connection rather than being set once during migrate. A
+// connection with busy_timeout=0 fails a concurrent read (such as the
+// credentials lookup in requireRole) with SQLITE_BUSY, surfacing as a 500 even
+// though the lock write committed. WAL lets readers proceed alongside a writer.
+func TestStoreDSNCarriesPerConnectionPragmas(t *testing.T) {
+	dsn := storeDSN("rootaika.db")
+	for _, want := range []string{
+		"_pragma=busy_timeout(5000)",
+		"_pragma=foreign_keys(ON)",
+		"_pragma=journal_mode(WAL)",
+	} {
+		if !strings.Contains(dsn, want) {
+			t.Errorf("storeDSN missing %q, got %q", want, dsn)
+		}
+	}
+
+	// A path that already carries query params must append, not start a second
+	// query string.
+	withQuery := storeDSN("file:test?mode=memory&cache=shared")
+	if strings.Count(withQuery, "?") != 1 {
+		t.Errorf("storeDSN produced multiple query strings: %q", withQuery)
+	}
+	if !strings.Contains(withQuery, "cache=shared") || !strings.Contains(withQuery, "busy_timeout(5000)") {
+		t.Errorf("storeDSN dropped params when path had a query: %q", withQuery)
+	}
 }
 
 func TestOpenStoreSeedsDefaults(t *testing.T) {

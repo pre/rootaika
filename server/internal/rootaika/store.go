@@ -19,12 +19,34 @@ type Store struct {
 	db *sql.DB
 }
 
+// storeDSN builds the modernc.org/sqlite connection string. The pragmas are set
+// as DSN query params, not as a one-off statement, because busy_timeout and
+// foreign_keys are per-connection state in SQLite: a statement run once during
+// migrate only configures the single connection it happens to use, leaving every
+// other pooled connection with busy_timeout=0. Such a connection fails a
+// concurrent read with SQLITE_BUSY immediately. That is how an admin lock POST
+// could commit (the device locks) yet the following redirect's credentials read
+// hit a busy database and surface as a 500 "authentication failed". WAL lets
+// readers proceed while a write is in flight, removing most of that contention.
+func storeDSN(path string) string {
+	pragmas := []string{
+		"_pragma=busy_timeout(5000)",
+		"_pragma=foreign_keys(ON)",
+		"_pragma=journal_mode(WAL)",
+	}
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + strings.Join(pragmas, "&")
+}
+
 func OpenStore(path string) (*Store, error) {
 	if path == "" {
 		path = "rootaika.db"
 	}
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", storeDSN(path))
 	if err != nil {
 		return nil, err
 	}
@@ -89,9 +111,6 @@ func (s *Store) withTx(ctx context.Context, fn func(ctx context.Context, tx *sql
 
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
-PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 5000;
-
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
