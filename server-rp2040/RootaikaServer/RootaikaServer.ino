@@ -548,6 +548,9 @@ void handleWarningSoundUpload(WiFiClient& c, const char* contentType, long conte
   File out = LittleFS.open("/warning.mp3.tmp", "w");
   if (!out) { sendApiError(c, 500, "fs open failed"); return; }
 
+  Serial.print(F("[upload] start contentLength=")); Serial.print(contentLength);
+  Serial.print(F(" delimLen=")); Serial.println(delimLen);
+
   long remaining = contentLength;
   uint32_t t0 = millis();
 
@@ -580,30 +583,57 @@ void handleWarningSoundUpload(WiFiClient& c, const char* contentType, long conte
     if (i == 0) strcpy(fileName, "warning.mp3");
   }
 
-  // Phase 2: stream the file body, watching for the closing delimiter.
-  char window[96];
+  // Phase 2: stream the file body, watching for the closing delimiter. Read and
+  // write in BLOCKS, not byte by byte. The ESP-AT WiFi co-processor has a small
+  // RX buffer; a byte-at-a-time consumer (each followed by a single-byte flash
+  // write) is far too slow to drain it, so on a large upload the buffer overflows
+  // and the connection is reset after only a few KB. Bulk c.read() drains the
+  // socket quickly and a write buffer batches the flash writes.
+  static uint8_t rbuf[512];   // socket read chunk (static: keep it off the stack)
+  static uint8_t wbuf[512];   // flash write batch
+  char window[96];            // held-back bytes that might be the delimiter
   int winLen = 0;
+  int wbufLen = 0;
   long written = 0;
   bool foundDelim = false;
+  bool overflow = false;
   t0 = millis();
-  while (remaining > 0 && millis() - t0 < 30000) {
-    if (!c.available()) { updateButton(); continue; }
-    char ch = c.read(); remaining--;
+  while (!foundDelim && remaining > 0 && millis() - t0 < 30000) {
+    int avail = c.available();
+    if (avail <= 0) { updateButton(); continue; }
+    int want = avail;
+    if (want > (int)sizeof(rbuf)) want = sizeof(rbuf);
+    if ((long)want > remaining) want = (int)remaining;
+    int n = c.read(rbuf, want);
+    if (n <= 0) { updateButton(); continue; }
+    remaining -= n;
     t0 = millis();
-    window[winLen++] = ch;
-    if (winLen == delimLen) {
-      if (memcmp(window, delim, delimLen) == 0) { foundDelim = true; break; }
-      out.write((uint8_t)window[0]);     // confirmed non-delimiter: flush oldest byte
-      written++;
-      memmove(window, window + 1, --winLen);
+    for (int i = 0; i < n; i++) {
+      window[winLen++] = (char)rbuf[i];
+      if (winLen == delimLen) {
+        if (memcmp(window, delim, delimLen) == 0) { foundDelim = true; break; }
+        // Confirmed non-delimiter: emit the oldest byte via the write batch.
+        wbuf[wbufLen++] = (uint8_t)window[0];
+        written++;
+        if (wbufLen == (int)sizeof(wbuf)) { out.write(wbuf, wbufLen); wbufLen = 0; }
+        memmove(window, window + 1, --winLen);
+      }
     }
-    if (written > maxWarningSoundBytesRP) {
-      out.close(); LittleFS.remove("/warning.mp3.tmp");
-      sendApiError(c, 400, "file too large");
-      return;
-    }
+    if (written > maxWarningSoundBytesRP) { overflow = true; break; }
   }
+  if (wbufLen > 0) out.write(wbuf, wbufLen);
   out.close();
+
+  if (overflow) {
+    LittleFS.remove("/warning.mp3.tmp");
+    sendApiError(c, 400, "file too large");
+    return;
+  }
+
+  Serial.print(F("[upload] done foundDelim=")); Serial.print(foundDelim);
+  Serial.print(F(" written=")); Serial.print(written);
+  Serial.print(F(" remaining=")); Serial.print(remaining);
+  Serial.print(F(" elapsedMs=")); Serial.println(millis() - t0);
 
   if (!foundDelim || written == 0) {
     LittleFS.remove("/warning.mp3.tmp");
@@ -844,6 +874,11 @@ void setup() {
   Serial.print(F(" categories=")); Serial.println(g_categoryCount);
   applyLockLed();
 
+  // The RP2040<->ESP-AT link stays at 115200. Raising it (AT+UART_CUR to
+  // 230400/460800) was tried for faster uploads but breaks WiFi association on
+  // this wiring (verified on the real board: the AT handshake succeeds at the
+  // higher baud but WiFi.begin then fails). The large warning MP3 is flashed
+  // straight into LittleFS over USB instead (see scripts/flash-sound.sh).
   Serial2.begin(115200);
   delay(50);
   WiFi.init(Serial2);

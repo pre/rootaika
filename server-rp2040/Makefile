@@ -5,6 +5,10 @@
 #   make flash        upload the last build to the board (no recompile)
 #   make              build, then flash (default target)
 #   make upload       alias for flash
+#   make flash-sound MP3=path/to/sound.mp3
+#                     flash the warning MP3 into LittleFS over USB (BOOTSEL),
+#                     preserving existing data. Bypasses the slow WiFi upload.
+#                     The MP3 survives later `make flash` (separate flash region).
 #
 # The board is the iLabs Challenger RP2040 WiFi with a LittleFS partition.
 # See README.md for the toolchain (arduino-cli + rp2040 core + libraries) and
@@ -33,7 +37,7 @@ PORT        ?=
 VERBOSE     ?=
 V_FLAG      := $(if $(VERBOSE),--verbose,)
 
-.PHONY: all build flash upload clean help
+.PHONY: all build flash upload flash-sound clean help
 
 all: build flash
 
@@ -64,6 +68,14 @@ flash: $(SKETCH)/wifi.h
 		"$(SKETCH)"
 
 upload: flash
+
+# Flash the warning MP3 into the LittleFS partition over USB, preserving existing
+# data. Requires the board in BOOTSEL mode (hold BOOTSEL while plugging USB).
+# Independent of the firmware flash: the sketch lives at the start of flash, the
+# FS partition at the end, so this MP3 survives every later `make flash`.
+flash-sound:
+	@test -n "$(MP3)" || { echo "usage: make flash-sound MP3=path/to/sound.mp3" >&2; exit 1; }
+	FS=$(FS) FLASH=$(FLASH) scripts/flash-sound.sh "$(MP3)"
 
 $(SKETCH)/wifi.h:
 	@echo "error: $(SKETCH)/wifi.h missing." >&2

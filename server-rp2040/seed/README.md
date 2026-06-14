@@ -71,6 +71,25 @@ mklittlefs -c seed -s 4194304 littlefs.bin
 Reboot the board; `storageBegin()` reads `devices.json` + `settings.json` and the
 status page shows the seeded totals.
 
+## Warning sound (the lock-warning MP3)
+
+The warning MP3 lives on LittleFS as `/warning.mp3`, with `soundVer`/`soundName`/
+`soundSize` in `settings.json`. **Do not upload a large MP3 over WiFi** — the
+ESP-AT link is ~11 KB/s and a multipart upload over a few tens of KB overruns and
+can wedge the board. Flash the file straight into LittleFS over USB instead:
+
+```sh
+# From server-rp2040/, with the board in BOOTSEL mode
+# (unplug USB, hold BOOTSEL, replug -> an RPI-RP2 disk appears):
+make flash-sound MP3=~/Downloads/liike.mp3
+```
+
+`scripts/flash-sound.sh` reads the board's current LittleFS over USB, injects the
+MP3 and bumps `settings.json`, and writes the image back — so existing devices,
+events, and settings are preserved. It is independent of `make flash`: the sketch
+lives at the start of flash and the FS partition at the end, so the MP3 survives
+every later firmware flash.
+
 ## Pushing to a live board instead
 
 If the board is already running on the LAN, feed it over the client API rather
