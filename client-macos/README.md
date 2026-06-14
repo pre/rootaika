@@ -46,7 +46,25 @@ swift run RootaikaMac --test-lock 5
 
 # Run the agent (accessory app, no Dock icon). Optional server override.
 swift run RootaikaMac --server http://192.168.68.199:8080
+
+# Run with the debug console forced on for this run (see below).
+swift run RootaikaMac --debug
 ```
+
+## Debug mode
+
+Like the Windows client, the macOS agent has a debug mode that opens an on-screen
+terminal-style console window and traces, line by line, what it observes and
+exchanges with the server: each observation (idle seconds, frontmost app, derived
+state), every queued event, every upload with the server's accept/duplicate
+counts, every config long-poll with the returned settings, plus lock-state and
+warning-sound changes. Every line is also mirrored to stderr (the LaunchAgent
+captures it at `/tmp/rootaika-mac.err.log`).
+
+Debug mode turns on either when the server sets `debug_mode` for the device (the
+console appears/disappears live as the setting changes) or when the binary is
+started with `--debug` for a local diagnosis session. This is the macOS
+equivalent of the Windows client's runtime console.
 
 The default server URL is `http://192.168.68.199:8080`, using the direct LAN IP
 until DNS is available. Environment overrides (applied after defaults, persisted

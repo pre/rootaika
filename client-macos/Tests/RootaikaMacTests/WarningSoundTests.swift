@@ -13,7 +13,7 @@ private final class StubDownloader: BoardClienting, @unchecked Sendable {
         self.error = error
     }
 
-    func postEvents(_ batch: EventBatch) async throws {
+    func postEvents(_ batch: EventBatch) async throws -> EventBatchResponse {
         fatalError("unused")
     }
 

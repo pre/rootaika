@@ -7,7 +7,12 @@ actor Core {
     private let board: BoardClienting
     private let probe: ActivityProbing
     private let lock: LockControlling
+    private let debug: DebugLogging
     private var config: Config
+
+    // Tracks the last debug-mode value applied to the console so it is shown the
+    // moment the server enables debug and hidden when it disables it.
+    private var lastDebugMode: Bool = false
 
     // Buffered, unsent events (in-memory placeholder for the SQLite buffer).
     private var pending: [Event] = []
@@ -36,17 +41,22 @@ actor Core {
     // (green flicker). We act only when the intent actually changes.
     private var lastLockSignature: String?
 
-    init(config: Config, board: BoardClienting, probe: ActivityProbing, lock: LockControlling) {
+    init(config: Config, board: BoardClienting, probe: ActivityProbing, lock: LockControlling, debug: DebugLogging) {
         self.config = config
         self.board = board
         self.probe = probe
         self.lock = lock
+        self.debug = debug
     }
 
     // MARK: Run loops
 
     /// Start the three concurrent loops (observe, upload, poll) and block until cancelled.
     func run() async {
+        lastDebugMode = config.debugMode
+        debug.setVisible(config.debugMode)
+        debug.log("agent started: server=\(config.serverURL) client_id=\(config.clientID) debug=\(config.debugMode)")
+        debug.log("config: observe=\(config.observeIntervalSeconds)s idle_threshold=\(config.idleThresholdSeconds)s upload=\(config.uploadIntervalSeconds)s poll_wait=\(config.pollWaitSeconds)s")
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await self.observeLoop() }
             group.addTask { await self.uploadLoop() }
@@ -95,6 +105,8 @@ actor Core {
             sequence: 0
         )
 
+        debug.log("observe: idle=\(String(format: "%.1f", idle))s frontmost=\(foreground ?? "nil") -> state=\(state.rawValue) process=\(event.processName ?? "nil")")
+
         if shouldEmit(last: lastEvent, current: event, lastSentAt: lastSentAt, now: now) {
             let stateChanged = (lastEvent?.state != event.state)
             let processChanged = (lastEvent?.processName != event.processName)
@@ -102,6 +114,8 @@ actor Core {
             lastEvent = event
             lastSentAt = now
             lastReportedStatus = state
+            let reason = stateChanged ? "state-change" : (processChanged ? "process-change" : "heartbeat")
+            debug.log("queued event: state=\(state.rawValue) process=\(event.processName ?? "nil") reason=\(reason) pending=\(pending.count)")
             // Report state/process transitions immediately rather than waiting
             // for the next upload interval; heartbeats ride the interval.
             if stateChanged || processChanged {
@@ -181,10 +195,13 @@ actor Core {
             let slice = Array(pending.prefix(batchSize))
             let batch = EventBatch(clientID: config.clientID, events: slice)
             do {
-                try await board.postEvents(batch)
+                debug.log("upload: sending \(slice.count) event(s) to \(config.serverURL)/api/v1/events/batch")
+                let resp = try await board.postEvents(batch)
                 pending.removeFirst(slice.count) // mark-sent only after ack
+                debug.log("upload ok: accepted=\(resp.accepted) duplicate_or_ignored=\(resp.duplicateOrIgnored) device_id=\(resp.deviceID) remaining=\(pending.count)")
             } catch {
                 // Keep events queued; retry next cycle.
+                debug.log("upload failed: \(error) (keeping \(pending.count) event(s) queued)")
                 break
             }
         }
@@ -196,6 +213,7 @@ actor Core {
         while !Task.isCancelled {
             do {
                 let status = lastReportedStatus?.rawValue
+                debug.log("poll: GET /api/v1/client/config status=\(status ?? "nil") known_version=\(lastConfigVersion ?? "nil") wait=\(config.pollWaitSeconds)s")
                 let cfg = try await board.fetchConfig(
                     clientID: config.clientID,
                     status: status,
@@ -203,15 +221,11 @@ actor Core {
                     waitSeconds: config.pollWaitSeconds
                 )
                 await applyConfig(cfg)
-                if config.debugMode {
-                    FileHandle.standardError.write(Data("poll ok: version=\(cfg.configVersion) locked=\(cfg.locked)\n".utf8))
-                }
+                debug.log("poll ok: version=\(cfg.configVersion) debug=\(cfg.debugMode) locked=\(cfg.locked) warning=\(cfg.warningSeconds)s idle_threshold=\(cfg.idleThresholdSeconds)s upload=\(cfg.uploadIntervalSeconds)s")
                 let gap = max(1, 0) // minPollGapSeconds floor
                 try? await Task.sleep(nanoseconds: UInt64(gap) * 1_000_000_000)
             } catch {
-                if config.debugMode {
-                    FileHandle.standardError.write(Data("poll error: \(error)\n".utf8))
-                }
+                debug.log("poll error: \(error)")
                 let backoff = config.pollIntervalSeconds > 0 ? config.pollIntervalSeconds : 30
                 try? await Task.sleep(nanoseconds: UInt64(backoff) * 1_000_000_000)
             }
@@ -221,6 +235,12 @@ actor Core {
     func applyConfig(_ cfg: ClientConfig) async {
         lastConfigVersion = cfg.configVersion
         _ = config.applyServerConfig(cfg)
+        // Show/hide the on-screen console the moment the server toggles debug mode.
+        if config.debugMode != lastDebugMode {
+            lastDebugMode = config.debugMode
+            debug.log("debug mode \(config.debugMode ? "enabled" : "disabled") by server")
+            debug.setVisible(config.debugMode)
+        }
         await syncWarningSound(serverVersion: cfg.warningSoundVersion)
         try? config.save()
         applyLockState(locked: cfg.locked, message: cfg.lockMessage, warningSeconds: cfg.warningSeconds)
@@ -242,13 +262,13 @@ actor Core {
                 break
             case .cleared:
                 config.warningSoundVersion = ""
+                debug.log("warning sound: cleared (server has none)")
             case .updated(let version):
                 config.warningSoundVersion = version
+                debug.log("warning sound: downloaded new version \(version)")
             }
         } catch {
-            if config.debugMode {
-                FileHandle.standardError.write(Data("warning sound sync error: \(error)\n".utf8))
-            }
+            debug.log("warning sound sync error: \(error)")
         }
     }
 
@@ -265,6 +285,7 @@ actor Core {
             return
         }
         lastLockSignature = signature
+        debug.log("lock state change: locked=\(locked) warning=\(warningSeconds)s warned=\(warned) message=\(message.isEmpty ? "(none)" : message)")
 
         if !locked {
             warningTask?.cancel()

@@ -5,12 +5,14 @@ import AppKit
 //   --selftest            : no GUI; exercise config load + JSON round-trip + stub event build; print OK; exit 0
 //   --test-lock <seconds> : show the lock overlay for N seconds, then exit
 //   --server <url>        : override server URL for this run
+//   --debug               : force debug mode on for this run (show the console immediately)
 //   (default)             : run the agent loop as an accessory (LSUIElement) app
 
 struct CLIOptions {
     var serverOverride: String?
     var selftest = false
     var testLockSeconds: Int?
+    var forceDebug = false
 }
 
 func parseArgs(_ args: [String]) -> CLIOptions {
@@ -25,6 +27,8 @@ func parseArgs(_ args: [String]) -> CLIOptions {
             if i + 1 < args.count { opts.serverOverride = args[i + 1]; i += 1 }
         case "--test-lock":
             if i + 1 < args.count { opts.testLockSeconds = Int(args[i + 1]); i += 1 }
+        case "--debug":
+            opts.forceDebug = true
         default:
             break
         }
@@ -37,6 +41,9 @@ func loadConfig(_ opts: CLIOptions) throws -> Config {
     var config = try Config.load()
     if let server = opts.serverOverride, !server.isEmpty {
         config.serverURL = server
+    }
+    if opts.forceDebug {
+        config.debugMode = true
     }
     return config
 }
@@ -120,7 +127,8 @@ func runAgent(_ opts: CLIOptions) -> Int32 {
     let board = NetworkBoardClient(config: config)
     let probe = MacActivityProbe()
     let lock = MacLockController()
-    let core = Core(config: config, board: board, probe: probe, lock: lock)
+    let debug = MacDebugConsole()
+    let core = Core(config: config, board: board, probe: probe, lock: lock, debug: debug)
 
     Task.detached {
         await core.run()

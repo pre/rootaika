@@ -45,7 +45,8 @@ final class NetworkBoardClient: BoardClienting {
 
     // MARK: - Public API
 
-    func postEvents(_ batch: EventBatch) async throws {
+    @discardableResult
+    func postEvents(_ batch: EventBatch) async throws -> EventBatchResponse {
         let url = try makeURL(path: "/api/v1/events/batch", queryItems: nil)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -59,8 +60,11 @@ final class NetworkBoardClient: BoardClienting {
 
         let (data, response) = try await performWithRetry(request, timeout: standardTimeout)
         try ensureSuccess(data: data, response: response)
-        // Response body decode is best-effort; the Core loop only needs success.
-        _ = try? RootaikaJSON.makeDecoder().decode(EventBatchResponse.self, from: data)
+        // Response body decode is best-effort; a successful HTTP status already
+        // means the batch was stored. Fall back to a zeroed response so the
+        // caller (debug trace) still has a value to print.
+        return (try? RootaikaJSON.makeDecoder().decode(EventBatchResponse.self, from: data))
+            ?? EventBatchResponse(accepted: batch.events.count, duplicateOrIgnored: 0, deviceID: 0)
     }
 
     func fetchConfig(
