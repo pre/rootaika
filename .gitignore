@@ -5,3 +5,4 @@ __pycache__/
 
 # ESP32 client config (WiFi + server credentials)
 client-wt32-sc01/RootaikaBoard/config.h
+client-wt32-sc01/build/

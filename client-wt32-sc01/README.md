@@ -46,7 +46,7 @@ cp client-wt32-sc01/RootaikaBoard/config.h.example \
 The endpoint paths are appended to `SERVER_URL` at the top of
 `RootaikaBoard/RootaikaBoard.ino`.
 
-## Build and flash (arduino-cli)
+## Build and flash
 
 The board exposes a native USB CDC serial port, so no external USB-serial
 adapter is needed.
@@ -64,13 +64,18 @@ arduino-cli lib install LovyanGFX ArduinoJson
 Note: esp32 core 2.0.17 is used because newer 3.x cores have known LovyanGFX
 build issues.
 
-Compile and upload (replace the port with your own):
+Build and flash:
 
 ```sh
-arduino-cli compile --upload -p /dev/cu.usbmodem1101 \
-  --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi,FlashSize=8M" \
-  client-wt32-sc01/RootaikaBoard
+cd client-wt32-sc01
+make PORT=/dev/cu.usbmodem1101
 ```
+
+The Makefile auto-detects a USB serial port when possible, so `make` is enough
+when only the board's USB port is visible. Use `make build` to compile only,
+`make flash PORT=/dev/cu.usbmodem1101` to flash a previously built firmware,
+`make clean` to remove build artifacts, and `make help` to show the available
+commands and overrides.
 
 If upload fails in a connect/disconnect loop, force the bootloader: hold
 BOOT/GPIO0, tap RESET, release GPIO0, then upload again.
