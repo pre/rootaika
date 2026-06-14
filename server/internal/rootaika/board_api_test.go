@@ -100,7 +100,7 @@ func TestBoardTodayComputesMinutesAndRefresh(t *testing.T) {
 
 func TestBoardButtonRequiresAuth(t *testing.T) {
 	app := testApp(t)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/board/button", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/lock", nil)
 	recorder := httptest.NewRecorder()
 	app.ServeHTTP(recorder, request)
 
@@ -157,7 +157,7 @@ func TestBoardButtonTogglesAllAssignedDevices(t *testing.T) {
 
 func TestBoardUnlockRequiresAuth(t *testing.T) {
 	app := testApp(t)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/board/unlock", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/unlock", nil)
 	recorder := httptest.NewRecorder()
 	app.ServeHTTP(recorder, request)
 
@@ -192,7 +192,7 @@ func TestBoardUnlockReleasesAssignedDevices(t *testing.T) {
 		}
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/board/unlock", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/unlock", nil)
 	request.SetBasicAuth("client", "client")
 	recorder := httptest.NewRecorder()
 	app.ServeHTTP(recorder, request)
@@ -216,7 +216,7 @@ func TestBoardUnlockReleasesAssignedDevices(t *testing.T) {
 
 func pressBoardButton(t *testing.T, app *App) (bool, int) {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/board/button", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/lock", nil)
 	request.SetBasicAuth("client", "client")
 	recorder := httptest.NewRecorder()
 	app.ServeHTTP(recorder, request)
