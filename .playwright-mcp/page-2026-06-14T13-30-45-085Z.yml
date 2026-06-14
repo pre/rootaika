@@ -1,0 +1,32 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: rootaika
+      - heading "Ruutuaika" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Tänään 2026-06-14, rooli admin. Päivitetty 2026-06-14 16:30:44.
+    - navigation [ref=e8]:
+      - link "Tänään" [ref=e9] [cursor=pointer]:
+        - /url: /
+      - link "Viikko" [ref=e10] [cursor=pointer]:
+        - /url: /week
+      - link "Kuukausi" [ref=e11] [cursor=pointer]:
+        - /url: /month
+      - link "Taulu" [ref=e12] [cursor=pointer]:
+        - /url: /board
+      - link "Asetukset" [ref=e13] [cursor=pointer]:
+        - /url: /settings
+  - generic [ref=e14]:
+    - heading "Tänään, ohjelmat per laite" [level=2] [ref=e15]
+    - article [ref=e17]:
+      - strong [ref=e18]: Ei laitteita
+      - paragraph [ref=e19]: Ensimmäinen client luodaan automaattisesti, kun se hakee configin tai lähettää eventtejä.
+  - heading "Kaikki laitteet, kumulatiivinen tänään" [level=2] [ref=e21]
+  - generic [ref=e22]:
+    - generic [ref=e23]:
+      - heading "Ohjelmat laitteittain" [level=2] [ref=e24]
+      - generic [ref=e25]:
+        - text: "Laite:"
+        - combobox "Laite:" [ref=e26]
+    - generic [ref=e27]:
+      - paragraph [ref=e29]: Kehitys tänään
+      - paragraph [ref=e31]: Yhteensä tänään

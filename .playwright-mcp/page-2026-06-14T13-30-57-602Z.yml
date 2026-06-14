@@ -1,0 +1,92 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: rootaika
+      - heading "Asetukset" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Rooli admin. Päivitetty 2026-06-14 16:30:57.
+    - navigation [ref=e8]:
+      - link "Tänään" [ref=e9] [cursor=pointer]:
+        - /url: /
+      - link "Viikko" [ref=e10] [cursor=pointer]:
+        - /url: /week
+      - link "Kuukausi" [ref=e11] [cursor=pointer]:
+        - /url: /month
+      - link "Taulu" [ref=e12] [cursor=pointer]:
+        - /url: /board
+      - link "Asetukset" [ref=e13] [cursor=pointer]:
+        - /url: /settings
+  - generic [ref=e14]:
+    - heading "Laitteet" [level=2] [ref=e15]
+    - table [ref=e16]:
+      - rowgroup [ref=e17]:
+        - row "ID Nimi UUID Käyttäjä Tila Viimeksi nähty Admin" [ref=e18]:
+          - columnheader "ID" [ref=e19]
+          - columnheader "Nimi" [ref=e20]
+          - columnheader "UUID" [ref=e21]
+          - columnheader "Käyttäjä" [ref=e22]
+          - columnheader "Tila" [ref=e23]
+          - columnheader "Viimeksi nähty" [ref=e24]
+          - columnheader "Admin" [ref=e25]
+      - rowgroup [ref=e26]:
+        - row "Ei laitteita." [ref=e27]:
+          - cell "Ei laitteita." [ref=e28]
+  - generic [ref=e29]:
+    - heading "Käyttäjät" [level=2] [ref=e30]
+    - table [ref=e31]:
+      - rowgroup [ref=e32]:
+        - row "ID Nimi Luotu Admin" [ref=e33]:
+          - columnheader "ID" [ref=e34]
+          - columnheader "Nimi" [ref=e35]
+          - columnheader "Luotu" [ref=e36]
+          - columnheader "Admin" [ref=e37]
+      - rowgroup [ref=e38]:
+        - row "Ei käyttäjiä." [ref=e39]:
+          - cell "Ei käyttäjiä." [ref=e40]
+    - generic [ref=e41]:
+      - textbox "Käyttäjän nimi" [ref=e42]
+      - button "Luo käyttäjä" [ref=e43] [cursor=pointer]
+  - generic [ref=e44]:
+    - heading "Asetukset" [level=2] [ref=e45]
+    - generic [ref=e46]:
+      - generic [ref=e47]:
+        - text: Idle-raja, s
+        - spinbutton "Idle-raja, s" [ref=e48]: "60"
+      - generic [ref=e49]:
+        - text: Upload-väli, s
+        - spinbutton "Upload-väli, s" [ref=e50]: "60"
+      - generic [ref=e51]:
+        - text: Polling-väli, s
+        - spinbutton "Polling-väli, s" [ref=e52]: "30"
+      - generic [ref=e53]:
+        - text: Maksimilaskentaväli, s
+        - spinbutton "Maksimilaskentaväli, s" [ref=e54]: "300"
+      - generic [ref=e55]:
+        - text: Kuvaajan y-maksimi, min
+        - spinbutton "Kuvaajan y-maksimi, min" [ref=e56]: "720"
+      - generic [ref=e57]:
+        - checkbox "Debug-tila (näytä clientin konsoli)" [ref=e58]
+        - text: Debug-tila (näytä clientin konsoli)
+      - generic [ref=e59]:
+        - checkbox "Debug-tila rekisteröimättömille clienteille" [ref=e60]
+        - text: Debug-tila rekisteröimättömille clienteille
+      - button "Tallenna asetukset" [ref=e62] [cursor=pointer]
+  - generic [ref=e63]:
+    - heading "Kategoriat" [level=2] [ref=e64]
+    - table [ref=e65]:
+      - rowgroup [ref=e66]:
+        - row "Tyyppi Pattern Kategoria" [ref=e67]:
+          - columnheader "Tyyppi" [ref=e68]
+          - columnheader "Pattern" [ref=e69]
+          - columnheader "Kategoria" [ref=e70]
+          - columnheader [ref=e71]
+      - rowgroup [ref=e72]:
+        - row "Ei kategoriasääntöjä." [ref=e73]:
+          - cell "Ei kategoriasääntöjä." [ref=e74]
+    - generic [ref=e75]:
+      - combobox [ref=e76]:
+        - option "exact" [selected]
+        - option "contains"
+        - option "prefix"
+      - textbox "steam.exe" [ref=e77]
+      - textbox "pelit" [ref=e78]
+      - button "Lisää kategoria" [ref=e79] [cursor=pointer]

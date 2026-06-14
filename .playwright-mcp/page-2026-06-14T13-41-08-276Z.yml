@@ -1,0 +1,123 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: rootaika
+      - heading "Asetukset" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Rooli admin. Päivitetty 2026-06-14 16:41:07.
+    - navigation [ref=e8]:
+      - link "Tänään" [ref=e9] [cursor=pointer]:
+        - /url: /
+      - link "Viikko" [ref=e10] [cursor=pointer]:
+        - /url: /week
+      - link "Kuukausi" [ref=e11] [cursor=pointer]:
+        - /url: /month
+      - link "Taulu" [ref=e12] [cursor=pointer]:
+        - /url: /board
+      - link "Historia" [ref=e13] [cursor=pointer]:
+        - /url: /history
+      - link "Asetukset" [ref=e14] [cursor=pointer]:
+        - /url: /settings
+  - generic [ref=e15]:
+    - heading "Laitteet" [level=2] [ref=e16]
+    - table [ref=e17]:
+      - rowgroup [ref=e18]:
+        - row "ID Nimi UUID Käyttäjä Tila Viimeksi nähty Admin" [ref=e19]:
+          - columnheader "ID" [ref=e20]
+          - columnheader "Nimi" [ref=e21]
+          - columnheader "UUID" [ref=e22]
+          - columnheader "Käyttäjä" [ref=e23]
+          - columnheader "Tila" [ref=e24]
+          - columnheader "Viimeksi nähty" [ref=e25]
+          - columnheader "Admin" [ref=e26]
+      - rowgroup [ref=e27]:
+        - row "1 Laite st-dev-1 test-dev-1 ei liitetty unassigned lukitaan (60 s varoitus) 2026-06-14 16:41:03 Laite st-dev-1 Ei käyttäjää Tallenna 60 Lock Unlock Poista" [ref=e28]:
+          - cell "1" [ref=e29]
+          - cell "Laite st-dev-1" [ref=e30]
+          - cell "test-dev-1" [ref=e31]:
+            - code [ref=e32]: test-dev-1
+          - cell "ei liitetty" [ref=e33]
+          - cell "unassigned lukitaan (60 s varoitus)" [ref=e34]:
+            - text: unassigned
+            - text: lukitaan (60 s varoitus)
+          - cell "2026-06-14 16:41:03" [ref=e35]
+          - cell "Laite st-dev-1 Ei käyttäjää Tallenna 60 Lock Unlock Poista" [ref=e36]:
+            - generic [ref=e37]:
+              - textbox "Laitteen nimi" [ref=e38]: Laite st-dev-1
+              - combobox "Käyttäjä" [ref=e39]:
+                - option "Ei käyttäjää" [selected]
+              - button "Tallenna" [ref=e40] [cursor=pointer]
+            - generic [ref=e41]:
+              - textbox "Lukitusviesti" [ref=e42]:
+                - /placeholder: Viesti lukitusruudulle
+              - spinbutton "Varoitusaika sekunteina" [ref=e43]: "60"
+              - button "Lock" [ref=e44] [cursor=pointer]
+            - button "Unlock" [ref=e46] [cursor=pointer]
+            - button "Poista" [ref=e48] [cursor=pointer]
+  - generic [ref=e49]:
+    - heading "Käyttäjät" [level=2] [ref=e50]
+    - table [ref=e51]:
+      - rowgroup [ref=e52]:
+        - row "ID Nimi Luotu Admin" [ref=e53]:
+          - columnheader "ID" [ref=e54]
+          - columnheader "Nimi" [ref=e55]
+          - columnheader "Luotu" [ref=e56]
+          - columnheader "Admin" [ref=e57]
+      - rowgroup [ref=e58]:
+        - row "Ei käyttäjiä." [ref=e59]:
+          - cell "Ei käyttäjiä." [ref=e60]
+    - generic [ref=e61]:
+      - textbox "Käyttäjän nimi" [ref=e62]
+      - button "Luo käyttäjä" [ref=e63] [cursor=pointer]
+  - generic [ref=e64]:
+    - heading "Asetukset" [level=2] [ref=e65]
+    - generic [ref=e66]:
+      - generic [ref=e67]:
+        - text: Idle-raja, s
+        - spinbutton "Idle-raja, s" [ref=e68]: "60"
+      - generic [ref=e69]:
+        - text: Upload-väli, s
+        - spinbutton "Upload-väli, s" [ref=e70]: "60"
+      - generic [ref=e71]:
+        - text: Polling-väli, s
+        - spinbutton "Polling-väli, s" [ref=e72]: "30"
+      - generic [ref=e73]:
+        - text: Maksimilaskentaväli, s
+        - spinbutton "Maksimilaskentaväli, s" [ref=e74]: "300"
+      - generic [ref=e75]:
+        - text: Kuvaajan y-maksimi, min
+        - spinbutton "Kuvaajan y-maksimi, min" [ref=e76]: "720"
+      - generic [ref=e77]:
+        - text: Taulun päivitysväli, s
+        - spinbutton "Taulun päivitysväli, s" [ref=e78]: "60"
+      - generic [ref=e79]:
+        - checkbox "Debug-tila (näytä clientin konsoli)" [ref=e80]
+        - text: Debug-tila (näytä clientin konsoli)
+      - generic [ref=e81]:
+        - checkbox "Debug-tila rekisteröimättömille clienteille" [ref=e82]
+        - text: Debug-tila rekisteröimättömille clienteille
+      - button "Tallenna asetukset" [ref=e84] [cursor=pointer]
+    - heading "Lukitusvaroituksen ääni (MP3)" [level=3] [ref=e85]
+    - paragraph [ref=e86]: Ei ääntä asetettu. Varoitus näkyy ruudulla mutta ääntä ei soiteta.
+    - generic [ref=e87]:
+      - button "MP3-tiedosto" [ref=e88]
+      - button "Lataa ääni" [ref=e89] [cursor=pointer]
+  - generic [ref=e90]:
+    - heading "Kategoriat" [level=2] [ref=e91]
+    - table [ref=e92]:
+      - rowgroup [ref=e93]:
+        - row "Tyyppi Pattern Kategoria" [ref=e94]:
+          - columnheader "Tyyppi" [ref=e95]
+          - columnheader "Pattern" [ref=e96]
+          - columnheader "Kategoria" [ref=e97]
+          - columnheader [ref=e98]
+      - rowgroup [ref=e99]:
+        - row "Ei kategoriasääntöjä." [ref=e100]:
+          - cell "Ei kategoriasääntöjä." [ref=e101]
+    - generic [ref=e102]:
+      - combobox [ref=e103]:
+        - option "exact" [selected]
+        - option "contains"
+        - option "prefix"
+      - textbox "steam.exe" [ref=e104]
+      - textbox "pelit" [ref=e105]
+      - button "Lisää kategoria" [ref=e106] [cursor=pointer]

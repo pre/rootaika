@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rootaika - Windows client OTA auto-update</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --text: #1f2933;
+      --muted: #5b6673;
+      --border: #d8dee6;
+      --accent: #0f766e;
+      --accent-soft: #e6f4f1;
+      --warn: #8a5a00;
+      --warn-soft: #fff5d6;
+      --code: #f0f3f7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 48px 24px 72px;
+    }
+
+    header {
+      margin-bottom: 32px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      line-height: 1.05;
+    }
+
+    h2 {
+      margin: 40px 0 14px;
+      font-size: 1.45rem;
+      line-height: 1.25;
+    }
+
+    h3 {
+      margin: 22px 0 8px;
+      font-size: 1.08rem;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    ul,
+    ol {
+      margin: 0 0 16px 1.25rem;
+      padding: 0;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    code {
+      padding: 0.12rem 0.32rem;
+      border-radius: 4px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #101827;
+      color: #eef4ff;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 22px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf2f7;
+      font-weight: 650;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .note {
+      padding: 14px 16px;
+      border: 1px solid #f0d98b;
+      border-radius: 8px;
+      background: var(--warn-soft);
+      color: var(--warn);
+      margin: 0 0 18px;
+    }
+
+    .section {
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      margin-bottom: 18px;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.86rem;
+      font-weight: 650;
+    }
+
+    .file {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      color: var(--accent);
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="pill">Plan</p>
+      <h1>Windows client OTA auto-update</h1>
+      <p>
+        The Windows client updates itself over the air. The server declares a desired client
+        version; the client notices the mismatch during its normal config poll, downloads a
+        prebuilt binary from a <strong>public</strong> GitHub release, verifies it with SHA256,
+        swaps itself, and restarts, all <strong>without rebooting Windows</strong>. The old
+        process is stopped and the new one starts in its place.
+      </p>
+    </header>
+
+    <section class="section" aria-label="Background">
+      <h2>Background and goal</h2>
+      <p>
+        Today the client is installed manually on each of the 5&ndash;10 home gaming PCs and has
+        no update path: any fix or new feature means re-running <code>install.ps1</code> on every
+        machine. The goal is over-the-air updates driven by the server.
+      </p>
+      <h3>Constraints (confirmed)</h3>
+      <ul>
+        <li>
+          <strong>No new API calls.</strong> The client reports its current version inside the
+          existing <code>GET /api/v1/client/config</code> poll, and the server returns the desired
+          version in the same response. This mirrors how <code>status</code> is already
+          piggy-backed onto that poll.
+        </li>
+        <li>
+          <strong>GitHub owner/repo are fixed at compile time</strong> and are not
+          server-controllable (security). Only the release tag, asset name, and SHA256 come from
+          the server.
+        </li>
+        <li>
+          <strong>Single combined binary.</strong> Merge <code>rootaika-service</code> and
+          <code>rootaika-agent</code> into one <code>rootaika.exe</code> with subcommands, so one
+          file swap updates both processes.
+        </li>
+        <li><strong>Public repo</strong> (<code>github.com/pre/rootaika</code>) &rarr; anonymous HTTPS download, no token.</li>
+        <li><strong>SHA256 integrity check</strong> before swapping the binary.</li>
+        <li><strong>amd64 only.</strong> Windows amd64 is the only target.</li>
+        <li>
+          <strong>Desired version is global with a per-device override</strong>, so one machine can
+          be tested before the rest.
+        </li>
+        <li>
+          Update triggers on <strong>any difference</strong> (including a downgrade) &rarr; plain
+          string inequality, no semver ordering.
+        </li>
+        <li>
+          The release is published from a local machine via a script. No GitHub Actions yet.
+        </li>
+      </ul>
+      <div class="note">
+        <strong>Why the service does the work:</strong> <code>rootaika-service</code> runs as
+        LocalSystem, is the durable component, already polls the config endpoint, and controls the
+        agent through its watchdog. It is the natural place to download, verify, and orchestrate
+        the swap.
+      </div>
+    </section>
+
+    <section class="section" aria-label="Combined binary">
+      <h2>1. Combined binary (<span class="file">cmd/rootaika</span>)</h2>
+      <p>
+        Replace the two <code>cmd/</code> entrypoints with one dispatcher that runs from a single
+        linked exe (linked <code>-H=windowsgui</code> as the agent already is; the service needs no
+        console under the SCM).
+      </p>
+      <ul>
+        <li>
+          New <span class="file">client-windows/cmd/rootaika/main.go</span> dispatches on
+          <code>os.Args[1]</code>: <code>service</code> &rarr; <code>serviceapp.Run</code>,
+          <code>agent</code> &rarr; <code>agentapp.Run</code>, <code>apply-update</code> &rarr;
+          <code>updater.ApplyUpdate</code> (the transient self-swap helper, see &sect;5).
+        </li>
+        <li>
+          Move agent logic from <span class="file">cmd/rootaika-agent/main.go</span> into a new
+          <span class="file">internal/agentapp</span> package (and its <code>main_test.go</code>
+          &rarr; <code>agentapp</code> tests). The service already lives in
+          <span class="file">internal/serviceapp</span>.
+        </li>
+        <li>Delete <span class="file">cmd/rootaika-service</span> and <span class="file">cmd/rootaika-agent</span>.</li>
+        <li>
+          <strong>Debug console:</strong> the service must also attach/alloc a console in debug
+          mode now that the binary is GUI-subsystem. Reuse <span class="file">internal/consolewin</span>
+          (already windows/other split) in <code>serviceapp.Run</code>, the same pattern the agent
+          uses via <code>console.SetVisible</code>.
+        </li>
+      </ul>
+    </section>
+
+    <section class="section" aria-label="Version and fixed repo">
+      <h2>2. Version and fixed repo (<span class="file">internal/version</span>)</h2>
+      <p>New <span class="file">client-windows/internal/version/version.go</span>:</p>
+      <pre><code>package version
+
+// const, NOT ldflags: the server can never change the download origin.
+const GitHubOwner = "pre"
+const GitHubRepo  = "rootaika"
+
+// injected at build:
+//   -X rootaika/client-windows/internal/version.Version=v1.2.0
+var Version = "dev"</code></pre>
+      <p>
+        The download URL is built only from these constants plus the server-supplied tag and
+        asset name:
+        <code>https://github.com/pre/rootaika/releases/download/{tag}/{asset}</code> (works
+        anonymously for public repos).
+      </p>
+    </section>
+
+    <section class="section" aria-label="Poll carries version">
+      <h2>3. Poll carries version both ways</h2>
+      <ol>
+        <li>
+          <strong>Client &rarr; server:</strong> <code>api.Client.FetchConfig</code>
+          (<span class="file">internal/api/client.go</span>) gains a <code>version</code> argument,
+          added as a <code>&amp;version=</code> query param. <code>pollOnce</code>
+          (<span class="file">internal/serviceapp/app.go</span>) passes <code>version.Version</code>.
+        </li>
+        <li>
+          <strong>Server records it:</strong> in <code>handleClientConfig</code>
+          (<span class="file">server/internal/rootaika/handlers.go</span>), after the existing
+          <code>status</code> handling, record <code>version</code> via a new
+          <code>Store.RecordDeviceVersion</code>. Add <code>devices.last_version</code> and
+          <code>last_version_at_utc</code> columns with <code>ensureColumn</code>.
+        </li>
+        <li>
+          <strong>Server &rarr; client:</strong> the config JSON map in
+          <code>handleClientConfig</code> gains <code>desired_version</code>,
+          <code>artifact_name</code>, and <code>sha256</code>. The client
+          <code>model.ClientConfig</code> (<span class="file">internal/model/model.go</span>) gains
+          the matching fields.
+        </li>
+      </ol>
+      <div class="note">
+        These three update directives are <strong>transient</strong>. They must NOT be persisted to
+        <code>client.json</code> &rarr; do not add them to <code>ApplyServerConfig</code>.
+      </div>
+    </section>
+
+    <section class="section" aria-label="Server-side version config">
+      <h2>4. Server-side version config (global + per-device)</h2>
+      <p>
+        A version is a triple <code>(version_tag, artifact_name, sha256)</code> so a per-device
+        override stays self-consistent with a different release.
+      </p>
+      <ul>
+        <li>
+          <strong>Global</strong> (<span class="file">settings</span> table, new keys):
+          <code>desired_client_version</code>, <code>client_artifact_name</code>,
+          <code>client_sha256</code>.
+        </li>
+        <li>
+          <strong>Per-device override</strong> (<span class="file">device_config</span>, new columns
+          via <code>ensureColumn</code>): <code>desired_version</code>,
+          <code>desired_artifact_name</code>, <code>desired_sha256</code> (all empty = inherit
+          global).
+        </li>
+        <li>
+          <strong>Resolution</strong> in <code>Store.ClientConfig</code>: the effective triple is
+          the per-device triple when <code>desired_version != ""</code>, otherwise the global
+          triple. Surface it on <code>rootaika.ClientConfig</code>
+          (<span class="file">models.go</span>) and emit it in the handler.
+        </li>
+      </ul>
+      <div class="note">
+        <strong>Refactor required:</strong> <code>settingsFromDB</code> and
+        <code>settingsFromTx</code> (<span class="file">store.go</span>) currently
+        <code>strconv.Atoi</code> <em>every</em> settings row. Adding string-valued settings breaks
+        this. Change both to read a <code>key&rarr;string</code> map, parse only the known integer
+        keys into <code>Settings</code>, and assign the string keys directly. Add the string fields
+        to the <code>Settings</code> struct (<span class="file">models.go</span>) and to
+        <code>settingsFromForm</code> + <code>UpdateSettings</code>.
+      </div>
+      <h3>Admin UI (<span class="file">settings_views.go</span>)</h3>
+      <ul>
+        <li>Add the three global version fields to the settings form.</li>
+        <li>Add a compact per-device override form (3 inputs) in the devices table.</li>
+        <li>Show each device's reported <code>last_version</code> in a new column.</li>
+        <li>
+          The per-device form posts to a new <code>adminDeviceVersion</code> case in
+          <code>handleAdmin</code>, e.g. <code>/admin/devices/{id}/version</code> (follows the
+          existing <code>lock</code>/<code>assign</code>/<code>delete</code> routing pattern).
+        </li>
+      </ul>
+    </section>
+
+    <section class="section" aria-label="Update orchestration">
+      <h2>5. Update orchestration (client)</h2>
+      <p>
+        New package <span class="file">client-windows/internal/updater</span>. Pure parts are
+        testable on Linux; OS calls are split with build-tag pairs.
+      </p>
+      <ul>
+        <li>
+          <span class="file">updater.go</span> (pure):
+          <ul>
+            <li>
+              <code>NeedsUpdate(current string, p Plan) bool</code> &rarr; true when desired is
+              non-empty and <code>!=</code> current.
+            </li>
+            <li>
+              <code>Download(ctx, p, destPath)</code> builds the URL from
+              <code>version.GitHubOwner/Repo</code> + <code>p</code>, streams the asset to
+              <code>destPath</code>, and verifies SHA256. A mismatch is a terminal error and no
+              swap happens.
+            </li>
+          </ul>
+        </li>
+        <li>
+          <span class="file">apply_windows.go</span> / <span class="file">apply_other.go</span>:
+          <code>ApplyUpdate(args)</code> is the detached helper:
+          <ol>
+            <li><code>sc stop rootaika-service</code> and wait for STOPPED,</li>
+            <li>kill any running agent process,</li>
+            <li>rename <code>rootaika.exe</code> &rarr; <code>rootaika.exe.old</code>, copy staged <code>rootaika.update.exe</code> &rarr; <code>rootaika.exe</code>,</li>
+            <li><code>sc start rootaika-service</code> (its watchdog respawns the agent from the new exe),</li>
+            <li>best-effort delete <code>rootaika.exe.old</code>.</li>
+          </ol>
+        </li>
+      </ul>
+      <div class="note">
+        Self-replacement is safe: a running Windows exe can be <em>renamed</em> (not overwritten),
+        and both processes are stopped before the swap. The detached helper is what swaps the
+        service, since the service cannot replace its own running file.
+      </div>
+      <h3>Wiring in <code>serviceapp.pollOnce</code></h3>
+      <p>
+        After applying config, if <code>NeedsUpdate</code>: <code>Download</code> to
+        <code>&lt;installDir&gt;/rootaika.update.exe</code>, then launch the staged exe
+        <strong>detached</strong>:
+      </p>
+      <pre><code>rootaika.update.exe apply-update -target &lt;exe&gt; -service rootaika-service -config &lt;cfg&gt;</code></pre>
+      <p>
+        then initiate its own stop. <strong>Loop guard:</strong> remember the last failed
+        <code>(version, time)</code> in <code>stateStore</code> and skip retrying the same failed
+        version for ~30 minutes, so a bad release does not spin.
+      </p>
+    </section>
+
+    <section class="section" aria-label="Watchdog">
+      <h2>6. Watchdog uses the combined exe</h2>
+      <p>
+        <span class="file">internal/agentrunner/runner.go</span>: when <code>Path</code> is empty,
+        resolve to <code>os.Executable()</code> and run it with
+        <code>["agent", "-config", cfgPath]</code> instead of looking for
+        <code>rootaika-agent.exe</code>. This guarantees both processes always come from the one
+        on-disk file, so a single swap updates both.
+      </p>
+    </section>
+
+    <section class="section" aria-label="Scripts">
+      <h2>7. Install / uninstall + release scripts</h2>
+      <ul>
+        <li>
+          <span class="file">scripts/install.ps1</span>: copy the single
+          <code>rootaika.exe</code>; service <code>binPath = "rootaika.exe service -config ..."</code>;
+          HKLM Run = <code>"rootaika.exe agent -config ..."</code>; launch
+          <code>rootaika.exe agent</code> for the current session.
+        </li>
+        <li>
+          <span class="file">scripts/uninstall.ps1</span>: unchanged service/run names;
+          <code>-Purge</code> also removes <code>rootaika.exe.old</code> and
+          <code>rootaika.update.exe</code>.
+        </li>
+        <li>
+          <span class="file">scripts/build.ps1</span>: build one <code>rootaika.exe</code> with
+          <code>-ldflags "-H=windowsgui -X ...version.Version=$Version"</code>. This stays as
+          PowerShell for building/launching on a Windows box; release publishing is the Linux
+          <code>release.sh</code> below.
+        </li>
+        <li>
+          <strong>New <span class="file">scripts/release.sh v1.2.0</span> (Linux shell, not
+          PowerShell):</strong> cross-compile with
+          <code>GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui -X ...version.Version=$1" -o dist/rootaika.exe ./cmd/rootaika</code>,
+          compute SHA256 (<code>sha256sum</code>), <code>gh release create "$1" dist/rootaika.exe</code>
+          (public), then print the triple to paste into the admin UI:
+          <code>desired_client_version=v1.2.0</code>,
+          <code>client_artifact_name=rootaika.exe</code>, <code>client_sha256=&lt;hash&gt;</code>.
+        </li>
+      </ul>
+    </section>
+
+    <section class="section" aria-label="Reuse">
+      <h2>Reuse (do not write new)</h2>
+      <ul>
+        <li>
+          The poll pipeline already piggy-backs device state via the <code>status</code> query
+          param and returns a flat JSON config map &rarr; version travels the same route.
+        </li>
+        <li>Schema additions use the existing <code>ensureColumn</code> migration pattern.</li>
+        <li>Snapshot/update of in-memory config uses the existing <code>stateStore</code>.</li>
+        <li>
+          HTTP retry/backoff for transient failures already exists in
+          <span class="file">internal/api/client.go</span>; the download path can reuse the same
+          retry stance (retry network/5xx, never 4xx, terminal on SHA256 mismatch).
+        </li>
+        <li>
+          Console show/hide in debug mode already exists in
+          <span class="file">internal/consolewin</span> with a windows/other split.
+        </li>
+      </ul>
+    </section>
+
+    <section class="section" aria-label="Documentation">
+      <h2>Documentation</h2>
+      <ul>
+        <li>
+          <span class="file">README.md</span>: combined-binary build/install commands, the OTA
+          flow, and <code>release.ps1</code> usage.
+        </li>
+        <li>
+          <span class="file">plans/ruutuaika-suunnitelma.html</span>: add a row to the deviations
+          table (single combined <code>rootaika.exe</code>; version reported on the config poll;
+          server-declared desired version with global + per-device override; OTA self-swap via a
+          detached <code>apply-update</code> helper; SHA256-verified download from a
+          compile-time-fixed public GitHub repo).
+        </li>
+      </ul>
+    </section>
+
+    <section class="section" aria-label="Verification">
+      <h2>Verification</h2>
+      <ul>
+        <li>
+          <strong>Unit (Linux, <code>go test -race -cover ./...</code> in both modules):</strong>
+          <ul>
+            <li><code>updater.NeedsUpdate</code> truth table (empty desired, equal, different/downgrade).</li>
+            <li>
+              <code>updater.Download</code> against an <code>httptest</code> server: correct URL
+              from consts + plan, SHA256 match vs mismatch (mismatch = error, no file promoted).
+            </li>
+            <li>
+              Server: <code>ClientConfig</code> resolves the per-device triple over the global one;
+              <code>RecordDeviceVersion</code> persists; <code>settingsFromDB</code> still parses
+              ints after string settings are added; the handler emits the three fields.
+            </li>
+          </ul>
+        </li>
+        <li>
+          <strong>Manual (real Windows, per the <code>_windows.go</code> convention in CLAUDE.md):</strong>
+          <ol>
+            <li>Build v1 with <code>release.ps1</code>, install, confirm the device and version show in the admin UI.</li>
+            <li>Build v2, <code>gh release create</code>, set the global triple in the admin UI.</li>
+            <li>
+              Within one poll interval the service downloads, verifies, swaps, and restarts; the
+              admin shows v2; no reboot; the agent overlay/locking still work. Verify
+              <code>.old</code> is cleaned up and the SCM service is healthy.
+            </li>
+            <li>SHA256 mismatch &rarr; the client stays on v1, logs an error, and backs off (no loop).</li>
+            <li>A per-device override on one machine updates only it; clearing it falls back to global.</li>
+          </ol>
+        </li>
+        <li>
+          <strong>Cross-compile:</strong> <code>GOOS=windows GOARCH=amd64 go build ./...</code> in
+          <span class="file">client-windows/</span>.
+        </li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

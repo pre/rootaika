@@ -45,7 +45,7 @@ func TestLongPollReturnsImmediatelyWhenVersionStale(t *testing.T) {
 	// A stale (non-matching) version must return at once, never block, even with
 	// a large wait budget.
 	request := httptest.NewRequest(http.MethodGet,
-		"/api/v1/client/config?client_id=client-1&wait=30&version=staleversion", nil)
+		"/api/v1/client/config?client_id=client-1&wait=30&config_version=staleversion", nil)
 	request.SetBasicAuth("client", "client")
 	recorder := httptest.NewRecorder()
 
@@ -78,7 +78,7 @@ func TestLongPollWakesOnConfigChange(t *testing.T) {
 	}
 
 	request := httptest.NewRequest(http.MethodGet,
-		"/api/v1/client/config?client_id=client-1&wait=30&version="+version, nil)
+		"/api/v1/client/config?client_id=client-1&wait=30&config_version="+version, nil)
 	request.SetBasicAuth("client", "client")
 	recorder := httptest.NewRecorder()
 
@@ -138,7 +138,7 @@ func TestLongPollReturnsOnTimeoutUnchanged(t *testing.T) {
 	// wait=1 with a matching version: no change arrives, so it must return after
 	// roughly the wait budget with the same version.
 	request := httptest.NewRequest(http.MethodGet,
-		"/api/v1/client/config?client_id=client-1&wait=1&version="+version, nil)
+		"/api/v1/client/config?client_id=client-1&wait=1&config_version="+version, nil)
 	request.SetBasicAuth("client", "client")
 	recorder := httptest.NewRecorder()
 
@@ -173,7 +173,7 @@ func TestLongPollReturnsWhenClientDisconnects(t *testing.T) {
 
 	reqCtx, cancel := context.WithCancel(context.Background())
 	request := httptest.NewRequest(http.MethodGet,
-		"/api/v1/client/config?client_id=client-1&wait=30&version="+version, nil)
+		"/api/v1/client/config?client_id=client-1&wait=30&config_version="+version, nil)
 	request = request.WithContext(reqCtx)
 	request.SetBasicAuth("client", "client")
 	recorder := httptest.NewRecorder()

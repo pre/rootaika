@@ -90,14 +90,15 @@ func (c *Client) DownloadWarningSound(ctx context.Context) ([]byte, error) {
 
 // FetchConfig polls the server for this client's config. When waitSeconds > 0
 // it long-polls: the server holds the request open until the config changes
-// away from knownVersion or waitSeconds elapses, so a lock/unlock or settings
-// change reaches the client within milliseconds instead of at the next poll.
-// knownVersion is the config_version from the previous successful fetch; an
-// empty version disables blocking for this call and the server returns at once.
+// away from knownConfigVersion or waitSeconds elapses, so a lock/unlock or
+// settings change reaches the client within milliseconds instead of at the next
+// poll. knownConfigVersion is the config_version from the previous successful
+// fetch; empty disables blocking for this call and the server returns at once.
+// It travels as config_version, kept explicitly distinct from client_version.
 // clientVersion is this client's own build version, reported so the server can
 // record it and decide whether an OTA update is due; it travels as
-// client_version, kept distinct from the long-poll config version query param.
-func (c *Client) FetchConfig(ctx context.Context, clientID, status, knownVersion, clientVersion string, waitSeconds int) (model.ClientConfig, error) {
+// client_version.
+func (c *Client) FetchConfig(ctx context.Context, clientID, status, knownConfigVersion, clientVersion string, waitSeconds int) (model.ClientConfig, error) {
 	q := url.Values{"client_id": []string{clientID}}
 	if status != "" {
 		q.Set("status", status)
@@ -107,8 +108,8 @@ func (c *Client) FetchConfig(ctx context.Context, clientID, status, knownVersion
 	}
 	if waitSeconds > 0 {
 		q.Set("wait", strconv.Itoa(waitSeconds))
-		if knownVersion != "" {
-			q.Set("version", knownVersion)
+		if knownConfigVersion != "" {
+			q.Set("config_version", knownConfigVersion)
 		}
 	}
 	body, err := c.doJSON(ctx, http.MethodGet, "/api/v1/client/config", q, nil)

@@ -178,7 +178,7 @@ func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 	// matches the current config, hold the request open so a later change is
 	// delivered the instant it happens instead of at the next poll interval.
 	wait := clampWaitSeconds(r.URL.Query().Get("wait"))
-	known := r.URL.Query().Get("version")
+	known := r.URL.Query().Get("config_version")
 	if wait > 0 && known != "" && configVersion(config) == known {
 		updated, ok := a.waitForConfigChange(r.Context(), clientID, known, wait)
 		if !ok {

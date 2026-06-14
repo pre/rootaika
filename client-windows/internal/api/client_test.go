@@ -85,12 +85,12 @@ func TestClientPayloadsAndBasicAuth(t *testing.T) {
 	}
 }
 
-func TestFetchConfigSendsWaitAndVersion(t *testing.T) {
-	var gotWait, gotVersion string
+func TestFetchConfigSendsWaitAndConfigVersion(t *testing.T) {
+	var gotWait, gotConfigVersion string
 	client := New("http://rootaika.test", "client", "secret").WithHTTPClient(&http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			gotWait = r.URL.Query().Get("wait")
-			gotVersion = r.URL.Query().Get("version")
+			gotConfigVersion = r.URL.Query().Get("config_version")
 			return testResponse(http.StatusOK, `{"config_version":"v2","idle_threshold_seconds":30,"upload_interval_seconds":15,"poll_interval_seconds":5}`), nil
 		}),
 	})
@@ -102,8 +102,8 @@ func TestFetchConfigSendsWaitAndVersion(t *testing.T) {
 	if gotWait != "25" {
 		t.Fatalf("wait query = %q, want 25", gotWait)
 	}
-	if gotVersion != "v1" {
-		t.Fatalf("version query = %q, want v1", gotVersion)
+	if gotConfigVersion != "v1" {
+		t.Fatalf("config_version query = %q, want v1", gotConfigVersion)
 	}
 	if cfg.ConfigVersion != "v2" {
 		t.Fatalf("config_version = %q, want v2", cfg.ConfigVersion)
@@ -111,11 +111,11 @@ func TestFetchConfigSendsWaitAndVersion(t *testing.T) {
 }
 
 func TestFetchConfigOmitsWaitWhenZero(t *testing.T) {
-	var hadWait, hadVersion bool
+	var hadWait, hadConfigVersion bool
 	client := New("http://rootaika.test", "client", "secret").WithHTTPClient(&http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			_, hadWait = r.URL.Query()["wait"]
-			_, hadVersion = r.URL.Query()["version"]
+			_, hadConfigVersion = r.URL.Query()["config_version"]
 			return testResponse(http.StatusOK, `{"idle_threshold_seconds":30,"upload_interval_seconds":15,"poll_interval_seconds":5}`), nil
 		}),
 	})
@@ -123,8 +123,8 @@ func TestFetchConfigOmitsWaitWhenZero(t *testing.T) {
 	if _, err := client.FetchConfig(context.Background(), "client-1", "", "v1", "", 0); err != nil {
 		t.Fatalf("FetchConfig: %v", err)
 	}
-	if hadWait || hadVersion {
-		t.Fatalf("legacy poll must omit wait/version, got wait=%v version=%v", hadWait, hadVersion)
+	if hadWait || hadConfigVersion {
+		t.Fatalf("legacy poll must omit wait/config_version, got wait=%v config_version=%v", hadWait, hadConfigVersion)
 	}
 }
 
