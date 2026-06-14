@@ -47,31 +47,15 @@ if (-not (Test-Path $clientExe)) {
 $leftovers = Get-Process rootaika -ErrorAction SilentlyContinue
 if ($leftovers) {
     Write-Host "Stopping leftover rootaika processes from a previous run..." -ForegroundColor Yellow
-    # A previous run started as admin leaves an elevated process this non-admin
-    # session cannot kill. Stop-Process then fails with "Access is denied", which
-    # otherwise surfaces later as the exe being locked / the port still bound.
-    $stuck = @()
-    foreach ($p in $leftovers) {
-        try {
-            Stop-Process -Id $p.Id -Force -ErrorAction Stop
-        } catch {
-            $stuck += $p
-        }
-    }
-    if ($stuck) {
-        $ids = ($stuck | ForEach-Object { $_.Id }) -join ", "
-        throw "Could not stop elevated rootaika process(es) (PID: $ids). " +
-              "A previous run was started as admin. Stop it from an elevated " +
-              "PowerShell: Stop-Process -Id $ids -Force"
-    }
+    $leftovers | Stop-Process -Force
     Start-Sleep -Milliseconds 500
 }
 
 # An exe cannot be reliably launched from a UNC path, so copy into a local directory.
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 Copy-Item $clientExe $WorkDir -Force
-# Copying from the \\wsl.localhost\ UNC share stamps a network-zone Mark-of-the-Web
-# onto the file, which makes Windows refuse to launch it ("Access is denied").
+# Copying from the \\wsl.localhost\ UNC share stamps a network-zone Mark-of-the-Web;
+# clear it so that is one less thing in the way.
 Unblock-File (Join-Path $WorkDir "rootaika.exe")
 Write-Host "Binary copied -> $WorkDir" -ForegroundColor Green
 
@@ -90,11 +74,13 @@ Write-Host "Starting rootaika.exe service. Stop with Ctrl+C." -ForegroundColor Y
 Write-Host "Keep Firefox in the foreground for a moment, wait ~a minute, then refresh the dashboard." -ForegroundColor Yellow
 Write-Host ""
 
+$localExe = Join-Path $WorkDir "rootaika.exe"
+
 # Run the service from the same directory so its watchdog launches the agent from
 # the same rootaika.exe (os.Executable()).
 Push-Location $WorkDir
 try {
-    & (Join-Path $WorkDir "rootaika.exe") service
+    & $localExe service
 }
 finally {
     Pop-Location

@@ -106,8 +106,7 @@ The `scripts\test-run.ps1` script runs a lightweight test session with a single 
 
 ```sh
 cd client-windows
-GOOS=windows GOARCH=amd64 go build -o dist/rootaika-service.exe ./cmd/rootaika-service
-GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o dist/rootaika-agent.exe ./cmd/rootaika-agent
+GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o dist/rootaika.exe ./cmd/rootaika
 ```
 
 2. Run the script on the Windows side in PowerShell as a **normal user** (not as admin), so the agent sees the same session as your browser:
