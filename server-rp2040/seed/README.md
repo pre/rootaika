@@ -1,16 +1,21 @@
 # seed/ — example data for the RP2040 rootaika server
 
-These two files **are** the board's database. The firmware stores everything on
+These files **are** the board's database. The firmware stores everything on
 LittleFS as plain files (no SQLite on the microcontroller):
 
 | File | Meaning |
 |------|---------|
-| `devices.txt` | One device name per line. Line _N_ maps to device id _N_. |
-| `events.jsonl` | Append-only `activity_observed` log, one compact JSON object per line. |
+| `devices.json` | Device registry array (`id`/`uuid`/`name`/lock/config), the firmware's `Device` schema. |
+| `settings.json` | Global settings plus the `next*Id` counters, so devices/users created via the API after a flash get fresh ids. |
+| `events.jsonl` | Append-only `activity_observed` log, one compact JSON object per line. The `d` field is the device `id` from `devices.json`. |
+
+`users.json` and `categories.json` are written by the firmware when you create
+users/categories from the Settings page; the seed set does not generate them.
 
 The example set is **6 computers, each reporting every day for the last 30 days,
 with a random daily screen time between 0 and 400 minutes**. Computer names are
-single English words (`falcon`, `otter`, `willow`, `ember`, `cobalt`, `marble`).
+single English words (`falcon`, `otter`, `willow`, `ember`, `cobalt`, `marble`),
+seeded **unassigned** (assign a user on the Settings page to enable locking).
 
 ## Event line format
 
@@ -23,7 +28,7 @@ Each line matches exactly what the firmware writes in `handleEventsBatch()`, so
 
 | Key | Field | Notes |
 |-----|-------|-------|
-| `d` | device id | 1-based index into `devices.txt` |
+| `d` | device id | matches an `id` in `devices.json` |
 | `id` | event id | unique, for idempotent re-send |
 | `t` | occurred at | RFC3339 UTC, seconds precision |
 | `s` | state | `active` / `idle` / `locked` |
@@ -37,7 +42,8 @@ with an `idle` event so each day's countable total lands exactly on its target.
 
 > Note: the current firmware only renders the **newest day** present in the log
 > (the root page and `/api/v1/board/today`). The full 30 days are stored but not
-> yet shown, no week/month views or settings page exist on the board.
+> shown; the board has no week/month or chart views (those stay in the Go
+> server). A Settings page does exist at `/settings`.
 
 ## Regenerating
 
@@ -62,8 +68,8 @@ mklittlefs -c seed -s 4194304 littlefs.bin
 # Arduino "Pico LittleFS Data Upload" tool.
 ```
 
-Reboot the board; `loadDevices()` reads `devices.txt` and the status page shows
-the seeded totals.
+Reboot the board; `storageBegin()` reads `devices.json` + `settings.json` and the
+status page shows the seeded totals.
 
 ## Pushing to a live board instead
 

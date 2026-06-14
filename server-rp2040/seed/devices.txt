@@ -1,6 +1,0 @@
-falcon
-otter
-willow
-ember
-cobalt
-marble

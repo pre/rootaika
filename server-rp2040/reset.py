@@ -2,11 +2,12 @@
 """
 reset.py — clear the RP2040 rootaika server "database".
 
-The board's database is two LittleFS files: devices.txt and events.jsonl.
-There is no remote wipe endpoint in the firmware, so resetting means putting
-an EMPTY filesystem back onto the board. This script:
+The board's database is a set of LittleFS files: devices.json, settings.json,
+users.json, categories.json and events.jsonl. There is no remote wipe endpoint
+in the firmware, so resetting means putting an EMPTY filesystem back onto the
+board. This script:
 
-  1. empties the local seed/ files (devices.txt + events.jsonl -> 0 bytes), and
+  1. removes the local seed/ files, and
   2. prints the mklittlefs/upload commands to flash the empty FS to the board.
 
 After flashing the empty image and rebooting, the board boots with 0 devices.
@@ -24,7 +25,7 @@ import argparse
 import os
 import sys
 
-SEED_FILES = ("devices.txt", "events.jsonl")
+SEED_FILES = ("devices.json", "settings.json", "users.json", "categories.json", "events.jsonl")
 
 
 def main():

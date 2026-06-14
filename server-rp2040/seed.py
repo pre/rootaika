@@ -2,8 +2,10 @@
 """
 seed.py — generate (and optionally push) example data for the RP2040 rootaika server.
 
-Produces the two files that ARE the board's database on LittleFS:
-  seed/devices.txt   one device name per line (line N -> device id N)
+Produces the files that ARE the board's database on LittleFS:
+  seed/devices.json  device registry array (id/uuid/name/...), firmware schema
+  seed/settings.json global settings + id counters (so API-created devices
+                     after a flash do not reuse seeded ids)
   seed/events.jsonl  append-only activity_observed log, compact firmware format
 
 Default dataset: 6 computers, each reporting every day for the last 30 days,
@@ -156,14 +158,58 @@ def generate(devices, days, end_date, min_minutes, max_minutes, rng):
     return names, all_events
 
 
+def device_record(device_id, name):
+    """One entry of devices.json, matching the firmware's Device schema in
+    storage.h. The uuid equals the name so a later --push (client_id=name) maps
+    onto the same device the file seeded. Devices seed unassigned (userId 0)."""
+    return {
+        "id": device_id,
+        "uuid": name,
+        "name": name,
+        "userId": 0,
+        "locked": False,
+        "lockMsg": "",
+        "warnSeconds": 0,
+        "lastStatus": "",
+        "idle": 60,
+        "upload": 60,
+        "poll": 30,
+        "lastSeen": events_last_seen.get(device_id, ""),
+    }
+
+
 def write_files(seed_dir, names, events):
     os.makedirs(seed_dir, exist_ok=True)
-    with open(os.path.join(seed_dir, "devices.txt"), "w") as f:
-        for n in names:
-            f.write(n + "\n")
+
+    # newest occurred_at per device id, mirrored into Device.lastSeen
+    events_last_seen.clear()
+    for e in events:
+        t = e.occurred_at_str()
+        if t > events_last_seen.get(e.device_index, ""):
+            events_last_seen[e.device_index] = t
+
+    devices = [device_record(i, n) for i, n in enumerate(names, start=1)]
+    with open(os.path.join(seed_dir, "devices.json"), "w") as f:
+        json.dump(devices, f)
+
+    # settings.json: defaults + id counters past the seeded ids, so devices/users
+    # created via the API after flashing this image get fresh ids.
+    settings = {
+        "idle": 60, "upload": 60, "poll": 30, "maxGap": 300,
+        "chartYMax": 720, "boardRefresh": 60,
+        "debug": False, "debugUnassigned": False, "soundVer": 0,
+        "nextDeviceId": len(names) + 1, "nextUserId": 1, "nextCategoryId": 1,
+    }
+    with open(os.path.join(seed_dir, "settings.json"), "w") as f:
+        json.dump(settings, f)
+
     with open(os.path.join(seed_dir, "events.jsonl"), "w") as f:
         for e in events:
             f.write(e.to_jsonl() + "\n")
+
+
+# newest occurred_at per device id, filled by write_files for Device.lastSeen
+events_last_seen: dict[int, str] = {}
 
 
 def push(base_url, names, events, batch_size):
@@ -196,8 +242,8 @@ def push(base_url, names, events, batch_size):
             total += len(chunk)
         print(f"  pushed {len(evs):5d} events for {name}")
     print(f"pushed {total} events to {base_url}")
-    print("note: the board keeps its own device-id mapping and only renders the "
-          "newest day; historical days are stored but not shown by current firmware.")
+    print("note: the board auto-creates a device per client_id and only renders "
+          "the newest day; historical days are stored but not shown (no charts).")
 
 
 def main():
