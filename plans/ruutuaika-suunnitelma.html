@@ -346,6 +346,12 @@
             <td>Etusivu (<code>/</code>) keskittyy tänään-näkymään: "Tänään, ohjelmat per laite" -taulukko sekä Taululta siirretyt kuvaajat (kumulatiivinen tänään + ohjelmakohtaiset). Hallinta-asiat (Laitteet, Käyttäjät, Asetukset, Kategoriat) siirretty omalle <code>/settings</code>-sivulle; admin-POSTit ohjaavat takaisin <code>/settings#ankkuri</code>. Navigaation "Asetukset" osoittaa <code>/settings</code>:iin.</td>
             <td><span class="status status-done">valmis</span></td>
           </tr>
+          <tr>
+            <td>Lukitushistoria</td>
+            <td>Ei suunnitelmassa.</td>
+            <td>Uusi <code>/history</code>-sivu näyttää lukitusten historian kahdessa taulukossa. (1) Laitteiden raportoima lukitustila johdetaan append-only-eventtivirrasta SQL-ikkunafunktiolla (<code>LAG</code>): siirtymä <code>state=locked</code>-tilaan on lukitus, siitä pois avaus, toistuvat samat tilat eivät tuota rivejä. (2) Admin- ja taulukomennot tallennetaan uuteen <code>lock_audit</code>-tauluun, johon kirjataan rivi <code>SetDeviceLock</code>, <code>ToggleAllLocks</code> ja <code>UnlockAllLocks</code> -kutsuissa (lähde: admin / taulun nappi / taulun avaus). Molemmat taulukot näkyvät admin- ja client-roolilla (read-only), uusin ensin, enintään 200 riviä.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
         </tbody>
       </table>
     </section>
