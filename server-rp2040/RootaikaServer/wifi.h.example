@@ -1,0 +1,5 @@
+#pragma once
+// Kopioi tämä tiedostoksi  wifi.h  ja täytä omat tunnukset.
+// wifi.h on .gitignoressa eikä päädy versionhallintaan.
+#define SECRET_SSID "OmaWiFiVerkko"
+#define SECRET_PASS "salasana"
