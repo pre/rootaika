@@ -48,4 +48,5 @@ type ClientConfig struct {
 	Locked                 *bool  `json:"locked,omitempty"`
 	LockMessage            string `json:"lock_message,omitempty"`
 	WarningSeconds         int    `json:"warning_seconds,omitempty"`
+	WarningSoundVersion    string `json:"warning_sound_version,omitempty"`
 }

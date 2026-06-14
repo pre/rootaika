@@ -162,9 +162,17 @@
     <header>
       <p class="pill">Suunnitelma</p>
       <h1>Lukitusvaroitus</h1>
+      <div class="note">
+        <strong>Päivitys:</strong> TTS-puhe on poistettu toteutuksesta. Sen tilalle tuli
+        admin-ladattava MP3-varoitusääni, jota client soittaa loopaten varoituksen ajan
+        (ks. poikkeamataulukon rivi "Lukitusvaroituksen ääni (MP3)" tiedostossa
+        <span class="file">ruutuaika-suunnitelma.html</span>). Tämä dokumentti kuvaa
+        alkuperäisen TTS-pohjaisen suunnitelman; laskuri-overlay ja varoituslogiikka
+        pätevät edelleen, vain äänilähde vaihtui.
+      </div>
       <p>
         Ennen kuin agentti lukitsee ruudun, käyttäjää varoitetaan: agentti
-        <strong>puhuu</strong> palvelimelta tulleen viestin (macOS <code>say</code> -tyyliin) ja
+        <strong>soittaa varoitusäänen</strong> ja
         näyttää <strong>laskurin</strong>, joka leijuu kaiken päällä mutta ei varasta fokusta
         eikä keskeytä peliä. Käynnissä olevaa Steam-peliä voi pelata varoitusajan loppuun asti.
         Kun laskuri päättyy, nykyinen lukitusoverlay ottaa ruudun haltuun.

@@ -44,6 +44,7 @@ go build -o rootaika-server ./cmd/rootaika-server
 |---|---|---|
 | `ROOTAIKA_ADDR` | `:8080` | Listen address/port |
 | `ROOTAIKA_DB_PATH` | `rootaika.db` | SQLite file path |
+| `ROOTAIKA_DATA_DIR` | dir of `ROOTAIKA_DB_PATH` | Directory for filesystem assets (uploaded lock-warning MP3) |
 | `ROOTAIKA_ADMIN_USER` | `admin` | Admin UI user |
 | `ROOTAIKA_ADMIN_PASSWORD` | `admin` | Admin UI password |
 | `ROOTAIKA_CLIENT_USER` | `client` | Client API user |

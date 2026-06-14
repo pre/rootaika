@@ -75,6 +75,7 @@ func startAgentHTTP(ctx context.Context, store *stateStore, eventBuffer *buffer.
 			IdleThresholdSeconds:   cfg.IdleThresholdSeconds,
 			ObserveIntervalSeconds: cfg.ObserveIntervalSeconds,
 			DebugMode:              cfg.DebugMode,
+			WarningSoundPath:       cachedWarningSoundPath(cfg, store.path),
 		})
 	})
 	mux.HandleFunc("/agent/events", func(w http.ResponseWriter, r *http.Request) {
@@ -206,6 +207,20 @@ func pollOnce(ctx context.Context, store *stateStore) error {
 	}); err != nil {
 		return err
 	}
+
+	// Reconcile the cached warning MP3 with the server's version. A download
+	// failure is logged but not fatal: the existing cached sound (if any) keeps
+	// working and the next poll retries.
+	if err := store.update(func(cfg *config.Config) bool {
+		changed, err := syncWarningSound(ctx, client, cfg, store.path, serverConfig.WarningSoundVersion)
+		if err != nil {
+			log.Printf("warning sound sync failed: %v", err)
+		}
+		return changed
+	}); err != nil {
+		return err
+	}
+
 	log.Printf("config applied: locked=%t", store.snapshot().Locked)
 	return nil
 }
@@ -311,4 +326,5 @@ type agentStateResponse struct {
 	IdleThresholdSeconds   int    `json:"idle_threshold_seconds"`
 	ObserveIntervalSeconds int    `json:"observe_interval_seconds"`
 	DebugMode              bool   `json:"debug_mode"`
+	WarningSoundPath       string `json:"warning_sound_path"`
 }

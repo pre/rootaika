@@ -69,9 +69,9 @@ func run(ctx context.Context, cfgPath string) error {
 	var lastSentAt time.Time
 
 	// Lock warning state. When the server requests a lock with LockWarningSeconds
-	// > 0, the agent first runs a non-blocking countdown (TTS + click-through
-	// overlay) in a goroutine so the game stays playable, and only engages the
-	// black lock overlay once the countdown elapses. An unlock during the
+	// > 0, the agent first runs a non-blocking countdown (looping MP3 + click-
+	// through overlay) in a goroutine so the game stays playable, and only engages
+	// the black lock overlay once the countdown elapses. An unlock during the
 	// countdown cancels it.
 	var (
 		warnCancel context.CancelFunc
@@ -119,12 +119,12 @@ func run(ctx context.Context, cfgPath string) error {
 				warnCancel = cancel
 				warnDone = make(chan struct{})
 				warning = true
-				go func(msg string, secs int, done chan struct{}) {
+				go func(msg string, secs int, soundPath string, done chan struct{}) {
 					defer close(done)
-					if err := locker.Warn(wctx, msg, secs); err != nil {
+					if err := locker.Warn(wctx, msg, secs, soundPath); err != nil {
 						log.Printf("lock warning failed: %v", err)
 					}
-				}(state.LockMessage, state.LockWarningSeconds, warnDone)
+				}(state.LockMessage, state.LockWarningSeconds, state.WarningSoundPath, warnDone)
 				log.Printf("lock warning started: %ds", state.LockWarningSeconds)
 			}
 		} else {
@@ -296,6 +296,7 @@ type serviceState struct {
 	IdleThresholdSeconds   int    `json:"idle_threshold_seconds"`
 	ObserveIntervalSeconds int    `json:"observe_interval_seconds"`
 	DebugMode              bool   `json:"debug_mode"`
+	WarningSoundPath       string `json:"warning_sound_path"`
 }
 
 type agentEventsRequest struct {

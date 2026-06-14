@@ -295,7 +295,13 @@
           <tr>
             <td>Lukitusvaroitus</td>
             <td>Suunnitelmassa lukitus tuli kerralla ilman ennakkovaroitusta.</td>
-            <td>Lukituskomentoon lisätty <code>warning_seconds</code> (<code>device_config</code>-sarake, admin-lomakkeen numerokenttä, oletus 60). Jos &gt; 0, agentti ajaa varoituslaskurin ennen lukitusta: ruutu pysyy pelattavana koko varoitusajan (pelitunti lasketaan), läpiklikattava laskuribanneri (<code>WS_EX_TRANSPARENT | NOACTIVATE | LAYERED | TOPMOST</code>) leijuu päällä ja näyttää jäljellä olevan ajan + lukitusviestin, ja suomenkielinen TTS puhuu jäljellä olevan ajan (toisto minuutein yli minuutin, 10 s välein viimeisen minuutin). Lopuksi normaali lukitusoverlay ottaa ruudun. Unlock varoituksen aikana peruuttaa kaiken. Exclusive-fullscreen DirectX-peli ei näytä banneria (ääni kantaa silti); injektoimatonta overlayta ei tehdä. Todennettava käsin Windowsilla.</td>
+            <td>Lukituskomentoon lisätty <code>warning_seconds</code> (<code>device_config</code>-sarake, admin-lomakkeen numerokenttä, oletus 60). Jos &gt; 0, agentti ajaa varoituslaskurin ennen lukitusta: ruutu pysyy pelattavana koko varoitusajan (pelitunti lasketaan), läpiklikattava laskuribanneri (<code>WS_EX_TRANSPARENT | NOACTIVATE | LAYERED | TOPMOST</code>) leijuu päällä ja näyttää jäljellä olevan ajan + lukitusviestin. Lopuksi normaali lukitusoverlay ottaa ruudun. Unlock varoituksen aikana peruuttaa kaiken. Exclusive-fullscreen DirectX-peli ei näytä banneria; injektoimatonta overlayta ei tehdä. (Aiempi suomenkielinen TTS-puhe poistettu, ks. rivi "Lukitusvaroituksen ääni (MP3)".) Todennettava käsin Windowsilla.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
+            <td>Lukitusvaroituksen ääni (MP3)</td>
+            <td>Ei suunnitelmassa (alun perin TTS-puhe).</td>
+            <td>Suomenkielinen TTS-puhe poistettu kokonaan. Tilalle admin lataa asetussivulla MP3-tiedoston, jonka palvelin tallentaa tiedostojärjestelmään (<code>ROOTAIKA_DATA_DIR</code>, oletus DB:n hakemisto) ja tarjoaa <code>GET /api/v1/warning-sound</code> -endpointissa (client-rooli). Tiedostoa ei tallenneta tietokantaan; sen versio johdetaan koosta + muokkausajasta ja kulkee config-vastauksen <code>warning_sound_version</code>-kentässä (mukana myös <code>config_version</code>-tiivisteessä, joten long-poll herää uudesta latauksesta). Service vertaa versiota ja lataa MP3:n välimuistiin (<code>warning.mp3</code> config-hakemistoon), agentti soittaa sen loopaten WMPlayer.OCX-COMilla koko varoituksen ajan ja lopettaa lukituksen/unlockin yhteydessä. Jos ääntä ei ole asetettu, varoitus näkyy ruudulla mutta mitään ei soiteta, eikä client kaadu. Todennettava käsin Windowsilla.</td>
             <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>

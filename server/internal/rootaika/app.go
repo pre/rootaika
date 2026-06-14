@@ -8,10 +8,11 @@ import (
 )
 
 type App struct {
-	store    *Store
-	now      func() time.Time
-	location *time.Location
-	notifier *configNotifier
+	store        *Store
+	now          func() time.Time
+	location     *time.Location
+	notifier     *configNotifier
+	warningSound *warningSoundStore
 }
 
 func NewApp(store *Store) *App {
@@ -20,11 +21,20 @@ func NewApp(store *Store) *App {
 		location = time.Local
 	}
 	return &App{
-		store:    store,
-		now:      func() time.Time { return time.Now().UTC() },
-		location: location,
-		notifier: newConfigNotifier(),
+		store:        store,
+		now:          func() time.Time { return time.Now().UTC() },
+		location:     location,
+		notifier:     newConfigNotifier(),
+		warningSound: newWarningSoundStore(""),
 	}
+}
+
+// WithDataDir points the app at a directory for filesystem-backed assets (the
+// admin-uploaded lock-warning MP3). An empty dir leaves the sound feature
+// disabled, which is the default for tests.
+func (a *App) WithDataDir(dir string) *App {
+	a.warningSound = newWarningSoundStore(dir)
+	return a
 }
 
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +57,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleProgramChart(w, r)
 	case r.URL.Path == "/api/v1/board/today" && r.Method == http.MethodGet:
 		a.handleBoardToday(w, r)
+	case r.URL.Path == "/api/v1/warning-sound" && r.Method == http.MethodGet:
+		a.handleWarningSound(w, r)
 	case r.URL.Path == "/api/v1/events/batch":
 		a.handleEventsBatch(w, r)
 	case r.URL.Path == "/api/v1/client/config":

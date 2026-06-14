@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -121,6 +122,34 @@ func validateBatch(request batchRequest) ([]EventInput, error) {
 // reverse-proxy idle timeout a future deployment might introduce.
 const maxConfigWaitSeconds = 60
 
+// handleWarningSound serves the admin-uploaded lock-warning MP3 to clients. It
+// returns 404 when no sound is configured so a client treats "no sound" as a
+// normal state and simply stays silent.
+func (a *App) handleWarningSound(w http.ResponseWriter, r *http.Request) {
+	if _, ok := a.requireRole(w, r, RoleClient); !ok {
+		return
+	}
+	path := a.warningSound.path()
+	if path == "" {
+		http.NotFound(w, r)
+		return
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "audio/mpeg")
+	w.Header().Set("ETag", `"`+a.warningSound.version()+`"`)
+	http.ServeContent(w, r, warningSoundFileName, info.ModTime(), file)
+}
+
 func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -131,7 +160,7 @@ func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientID := r.URL.Query().Get("client_id")
-	config, err := a.store.ClientConfig(r.Context(), clientID, a.now())
+	config, err := a.effectiveConfig(r.Context(), clientID)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
@@ -172,7 +201,7 @@ func (a *App) waitForConfigChange(ctx context.Context, clientID, known string, w
 	for {
 		changed := a.notifier.subscribe()
 
-		config, err := a.store.ClientConfig(ctx, clientID, a.now())
+		config, err := a.effectiveConfig(ctx, clientID)
 		if err != nil {
 			// Treat a transient read error like a timeout: fall back to
 			// returning the last good config to the caller.
@@ -190,6 +219,19 @@ func (a *App) waitForConfigChange(ctx context.Context, clientID, known string, w
 		case <-changed:
 		}
 	}
+}
+
+// effectiveConfig reads the device's stored config and stamps it with the
+// current warning-sound version, which the App tracks via the filesystem rather
+// than the store. Both the immediate response and the long-poll comparison use
+// this so a fresh upload changes config_version and reaches clients at once.
+func (a *App) effectiveConfig(ctx context.Context, clientID string) (ClientConfig, error) {
+	config, err := a.store.ClientConfig(ctx, clientID, a.now())
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	config.WarningSoundVersion = a.warningSound.version()
+	return config, nil
 }
 
 func (a *App) writeClientConfig(w http.ResponseWriter, clientID string, config ClientConfig) {
@@ -213,6 +255,7 @@ func (a *App) writeClientConfig(w http.ResponseWriter, clientID string, config C
 		"locked":                    config.Locked,
 		"lock_message":              config.LockMessage,
 		"warning_seconds":           config.WarningSeconds,
+		"warning_sound_version":     config.WarningSoundVersion,
 		"categories":                categories,
 	})
 }
@@ -255,6 +298,8 @@ func (a *App) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		a.adminDeleteDevice(w, r, parts[1])
 	case len(parts) == 1 && parts[0] == "settings":
 		a.adminSettings(w, r)
+	case len(parts) == 2 && parts[0] == "settings" && parts[1] == "warning-sound":
+		a.adminWarningSound(w, r)
 	case len(parts) == 1 && parts[0] == "categories":
 		a.adminCreateCategory(w, r)
 	case len(parts) == 3 && parts[0] == "categories" && parts[2] == "delete":
@@ -333,6 +378,27 @@ func (a *App) adminSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.store.UpdateSettings(r.Context(), settings, a.now()); err != nil {
 		http.Error(w, "update settings failed", http.StatusInternalServerError)
+		return
+	}
+	a.notifier.notify()
+	redirect(w, r, "/settings#settings")
+}
+
+// adminWarningSound stores the MP3 uploaded from the settings page and notifies
+// pollers so clients pick up the new sound version immediately.
+func (a *App) adminWarningSound(w http.ResponseWriter, r *http.Request) {
+	if !a.warningSound.enabled() {
+		http.Error(w, "warning sound storage is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	file, _, err := r.FormFile("sound")
+	if err != nil {
+		http.Error(w, "no file uploaded", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	if err := a.warningSound.save(file); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	a.notifier.notify()

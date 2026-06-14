@@ -72,6 +72,7 @@ type ClientConfig struct {
 	Locked                 bool
 	LockMessage            string
 	WarningSeconds         int
+	WarningSoundVersion    string
 	Categories             []ProgramCategory
 }
 

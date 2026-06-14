@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"rootaika/server/internal/rootaika"
 )
@@ -11,6 +12,7 @@ import (
 func main() {
 	dbPath := env("ROOTAIKA_DB_PATH", "rootaika.db")
 	addr := env("ROOTAIKA_ADDR", ":8080")
+	dataDir := env("ROOTAIKA_DATA_DIR", filepath.Dir(dbPath))
 
 	store, err := rootaika.OpenStore(dbPath)
 	if err != nil {
@@ -18,8 +20,9 @@ func main() {
 	}
 	defer store.Close()
 
-	log.Printf("rootaika server listening on %s, db=%s", addr, dbPath)
-	if err := http.ListenAndServe(addr, rootaika.NewApp(store)); err != nil {
+	log.Printf("rootaika server listening on %s, db=%s, data_dir=%s", addr, dbPath, dataDir)
+	app := rootaika.NewApp(store).WithDataDir(dataDir)
+	if err := http.ListenAndServe(addr, app); err != nil {
 		log.Fatal(err)
 	}
 }

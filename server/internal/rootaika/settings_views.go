@@ -7,13 +7,15 @@ import (
 )
 
 type settingsData struct {
-	Role       Role
-	ReadOnly   bool
-	Now        time.Time
-	Devices    []deviceView
-	Users      []User
-	Settings   Settings
-	Categories []ProgramCategory
+	Role                Role
+	ReadOnly            bool
+	Now                 time.Time
+	Devices             []deviceView
+	Users               []User
+	Settings            Settings
+	Categories          []ProgramCategory
+	WarningSoundEnabled bool
+	WarningSoundVersion string
 }
 
 func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -59,13 +61,15 @@ func (a *App) settingsViewData(r *http.Request, role Role) (settingsData, error)
 	}
 
 	return settingsData{
-		Role:       role,
-		ReadOnly:   role != RoleAdmin,
-		Now:        a.now().In(a.location),
-		Devices:    deviceViews,
-		Users:      users,
-		Settings:   settings,
-		Categories: categories,
+		Role:                role,
+		ReadOnly:            role != RoleAdmin,
+		Now:                 a.now().In(a.location),
+		Devices:             deviceViews,
+		Users:               users,
+		Settings:            settings,
+		Categories:          categories,
+		WarningSoundEnabled: a.warningSound.enabled(),
+		WarningSoundVersion: a.warningSound.version(),
 	}, nil
 }
 
@@ -212,6 +216,23 @@ var settingsTemplate = template.Must(template.New("settings").Funcs(template.Fun
         <label class="inline"><input name="debug_unassigned_clients" type="checkbox" value="on" {{if .Settings.DebugUnassignedClients}}checked{{end}} {{if .ReadOnly}}disabled{{end}}> Debug-tila rekisteröimättömille clienteille</label>
         {{if not .ReadOnly}}<div><button type="submit">Tallenna asetukset</button></div>{{end}}
       </form>
+
+      <h3>Lukitusvaroituksen ääni (MP3)</h3>
+      {{if .WarningSoundEnabled}}
+        {{if .WarningSoundVersion}}
+        <p class="muted">Ääni asetettu (versio {{.WarningSoundVersion}}). Client soittaa tämän varoituksen aikana.</p>
+        {{else}}
+        <p class="muted">Ei ääntä asetettu. Varoitus näkyy ruudulla mutta ääntä ei soiteta.</p>
+        {{end}}
+        {{if not .ReadOnly}}
+        <form method="post" action="/admin/settings/warning-sound" enctype="multipart/form-data" class="inline">
+          <input name="sound" type="file" accept="audio/mpeg,.mp3" required aria-label="MP3-tiedosto">
+          <button type="submit">Lataa ääni</button>
+        </form>
+        {{end}}
+      {{else}}
+        <p class="muted">Ääntä ei voi tallentaa: palvelimen data-hakemistoa ei ole määritetty.</p>
+      {{end}}
     </section>
 
     <section id="categories">

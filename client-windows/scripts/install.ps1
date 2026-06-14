@@ -25,8 +25,7 @@ param(
     [Parameter(Mandatory = $true)][string]$ServerUrl,
     [Parameter(Mandatory = $true)][string]$ClientPassword,
     [string]$ClientUsername = "client",
-    [string]$SourceDir = (Join-Path $PSScriptRoot "..\dist"),
-    [switch]$SkipFinnishVoice
+    [string]$SourceDir = (Join-Path $PSScriptRoot "..\dist")
 )
 
 $ErrorActionPreference = "Stop"
@@ -92,19 +91,6 @@ Write-Host "Starting service..."
 # starts without requiring a logoff/logon cycle.
 Write-Host "Launching agent for the current session..."
 Start-Process -FilePath $agentExe -ArgumentList "-config", $configPath
-
-# Install the Finnish speech voice so the lock warning is spoken correctly. This
-# is best-effort: a failure here must not abort the client install.
-if (-not $SkipFinnishVoice) {
-    Write-Host "Installing Finnish (fi-FI) speech voice for the lock warning..."
-    $voiceScript = Join-Path $PSScriptRoot "install-heidi-voice.ps1"
-    try {
-        & $voiceScript
-    } catch {
-        Write-Warning "Finnish voice install failed (continuing): $($_.Exception.Message)"
-        Write-Warning "Run scripts\install-heidi-voice.ps1 manually later, or the warning uses the default voice."
-    }
-}
 
 Write-Host ""
 Write-Host "rootaika client installed."

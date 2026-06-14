@@ -81,6 +81,13 @@ func (c *Client) PostEvents(ctx context.Context, batch model.EventBatch) error {
 	return err
 }
 
+// DownloadWarningSound fetches the admin-uploaded lock-warning MP3. It reuses
+// the shared retry/auth path, so a transient failure is retried like any other
+// request. The returned bytes are the raw MP3 the caller caches locally.
+func (c *Client) DownloadWarningSound(ctx context.Context) ([]byte, error) {
+	return c.doJSON(ctx, http.MethodGet, "/api/v1/warning-sound", nil, nil)
+}
+
 // FetchConfig polls the server for this client's config. When waitSeconds > 0
 // it long-polls: the server holds the request open until the config changes
 // away from knownVersion or waitSeconds elapses, so a lock/unlock or settings

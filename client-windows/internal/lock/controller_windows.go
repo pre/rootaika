@@ -213,27 +213,29 @@ $timer.Start()
 [System.Windows.Forms.Application]::Run($form)
 `
 
-// sayScript speaks the text in ROOTAIKA_SAY_TEXT once, preferring an installed
-// Finnish (fi-FI) voice and falling back to the default voice. The text travels
-// in an environment variable so message content cannot break out of the script.
-const sayScript = `
-Add-Type -AssemblyName System.Speech
-$s = New-Object System.Speech.Synthesis.SpeechSynthesizer
-try {
-  $fi = $s.GetInstalledVoices() |
-        Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.Name -eq 'fi-FI' } |
-        Select-Object -First 1
-  if ($fi) { $s.SelectVoice($fi.VoiceInfo.Name) }
-} catch { }
-$s.Speak($env:ROOTAIKA_SAY_TEXT)
+// playLoopScript plays the MP3 at ROOTAIKA_SOUND_PATH on repeat until the
+// process is killed. It uses the Windows Media Player COM object (WMPlayer.OCX),
+// which is present on every desktop Windows install and decodes MP3 without any
+// extra dependency. The path travels in an environment variable so it cannot
+// break out of the script. The script idles in a sleep loop; killing the process
+// (when the countdown ends or an unlock cancels the warning) stops playback.
+const playLoopScript = `
+$path = $env:ROOTAIKA_SOUND_PATH
+if (-not (Test-Path -LiteralPath $path)) { exit 0 }
+$player = New-Object -ComObject WMPlayer.OCX
+$player.settings.setMode('loop', $true)
+$player.settings.volume = 100
+$player.URL = $path
+$player.controls.play()
+while ($true) { Start-Sleep -Seconds 3600 }
 `
 
-// Warn runs the pre-lock warning: it shows a click-through countdown overlay and
-// speaks a Finnish time-remaining reminder, repeating the reminder on a cadence
-// that tightens as the deadline nears (every 60s above a minute, every 10s in
-// the final minute). It blocks until the countdown elapses or ctx is cancelled
-// (an unlock during the warning), then removes the overlay.
-func (c *Controller) Warn(ctx context.Context, message string, seconds int) error {
+// Warn runs the pre-lock warning: it shows a click-through countdown overlay and,
+// when a warning sound is cached, loops that MP3 for the duration. It blocks
+// until the countdown elapses or ctx is cancelled (an unlock during the
+// warning), then removes the overlay and stops the sound. A missing or empty
+// soundPath means no audio is played, which is a normal, non-fatal state.
+func (c *Controller) Warn(ctx context.Context, message string, seconds int, soundPath string) error {
 	if seconds <= 0 {
 		return nil
 	}
@@ -258,26 +260,15 @@ func (c *Controller) Warn(ctx context.Context, message string, seconds int) erro
 		}
 	}()
 
-	// Drive TTS from Go so the cadence matches speakSchedule exactly and so an
-	// unlock (ctx cancel) silences further reminders immediately.
-	marks := speakSchedule(seconds)
-	start := time.Now()
-	for _, remaining := range marks {
-		elapsed := seconds - remaining
-		target := start.Add(time.Duration(elapsed) * time.Second)
-		if wait := time.Until(target); wait > 0 {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(wait):
-			}
-		}
-		c.speak(ctx, countdownPhrase(remaining, message))
+	// Loop the warning sound for the whole countdown. Playback is best-effort: a
+	// failure to start (no sound cached, decode error) never blocks the lock.
+	if stop := c.playLoop(ctx, soundPath); stop != nil {
+		defer stop()
 	}
 
 	// Hold until the full countdown elapses (or unlock) before returning, so the
 	// caller engages the lock overlay only when the warning is truly over.
-	if wait := time.Until(start.Add(time.Duration(seconds) * time.Second)); wait > 0 {
+	if wait := time.Duration(seconds) * time.Second; wait > 0 {
 		select {
 		case <-ctx.Done():
 		case <-time.After(wait):
@@ -286,19 +277,29 @@ func (c *Controller) Warn(ctx context.Context, message string, seconds int) erro
 	return nil
 }
 
-// speak fires a one-shot TTS process for text and waits for it to finish so
-// reminders do not overlap. Failures are swallowed: TTS is best-effort and must
-// never block the lock from proceeding.
-func (c *Controller) speak(ctx context.Context, text string) {
+// playLoop starts a background process that loops soundPath and returns a stop
+// function that kills it. It returns nil when there is nothing to play (empty
+// path) or the process could not start, so the caller can safely skip stopping.
+func (c *Controller) playLoop(ctx context.Context, soundPath string) func() {
+	if soundPath == "" {
+		return nil
+	}
 	cmd := exec.CommandContext(ctx, "powershell.exe",
 		"-NoProfile",
 		"-ExecutionPolicy", "Bypass",
 		"-WindowStyle", "Hidden",
-		"-Command", sayScript,
+		"-Command", playLoopScript,
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	cmd.Env = append(os.Environ(), "ROOTAIKA_SAY_TEXT="+text)
-	_ = cmd.Run()
+	cmd.Env = append(os.Environ(), "ROOTAIKA_SOUND_PATH="+soundPath)
+	if err := cmd.Start(); err != nil {
+		return nil
+	}
+	return func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}
 }
 
 func (c *Controller) Close() error {

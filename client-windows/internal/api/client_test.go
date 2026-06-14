@@ -216,6 +216,35 @@ func TestBackoffDoublesAndCaps(t *testing.T) {
 	}
 }
 
+func TestDownloadWarningSound(t *testing.T) {
+	ctx := context.Background()
+	want := []byte("ID3 fake mp3 bytes")
+
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/v1/warning-sound" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if user, pass, ok := r.BasicAuth(); !ok || user != "client" || pass != "secret" {
+			t.Fatalf("missing or wrong basic auth: %q/%q", user, pass)
+		}
+		resp := testResponse(http.StatusOK, string(want))
+		resp.Header.Set("Content-Type", "audio/mpeg")
+		return resp, nil
+	})}
+
+	client := New("http://rootaika.test", "client", "secret").WithHTTPClient(httpClient)
+	got, err := client.DownloadWarningSound(ctx)
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("bytes = %q, want %q", got, want)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {

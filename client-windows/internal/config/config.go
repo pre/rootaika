@@ -44,7 +44,21 @@ type Config struct {
 	Locked                 bool   `json:"locked"`
 	LockMessage            string `json:"lock_message,omitempty"`
 	LockWarningSeconds     int    `json:"lock_warning_seconds,omitempty"`
-	DebugMode              bool   `json:"debug_mode"`
+	// WarningSoundVersion is the server version of the MP3 currently cached on
+	// disk at WarningSoundPath. The service compares it against the server's
+	// reported version and re-downloads when they differ. Empty means no sound is
+	// cached.
+	WarningSoundVersion string `json:"warning_sound_version,omitempty"`
+	DebugMode           bool   `json:"debug_mode"`
+}
+
+// WarningSoundPath is the local cache location of the lock-warning MP3, kept
+// next to client.json in the config base dir. The service downloads the file
+// here when the server reports a new version; the agent plays it during a
+// warning. Derived from the config path, not stored, so it always tracks the
+// active config location.
+func (c *Config) WarningSoundPath(configPath string) string {
+	return filepath.Join(filepath.Dir(ResolvePath(configPath)), "warning.mp3")
 }
 
 func DefaultBaseDir() string {

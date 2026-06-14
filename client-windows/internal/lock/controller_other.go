@@ -16,7 +16,7 @@ func (c *Controller) SetLocked(context.Context, bool, string) error {
 	return nil
 }
 
-func (c *Controller) Warn(context.Context, string, int) error {
+func (c *Controller) Warn(context.Context, string, int, string) error {
 	return nil
 }
 
