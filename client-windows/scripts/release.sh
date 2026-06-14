@@ -16,21 +16,17 @@ CLIENT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$CLIENT_ROOT/dist"
 ASSET="rootaika.exe"
 OUT="$DIST/$ASSET"
+INSTALLER="$CLIENT_ROOT/scripts/install.ps1"
 
-mkdir -p "$DIST"
+SHA256="$("$CLIENT_ROOT/scripts/build.sh" "$VERSION")"
 
-echo "Building $ASSET ($VERSION) for windows/amd64..."
-(
-  cd "$CLIENT_ROOT"
-  GOOS=windows GOARCH=amd64 go build \
-    -ldflags "-H=windowsgui -X rootaika/client-windows/internal/version.Version=$VERSION" \
-    -o "$OUT" ./cmd/rootaika
-)
-
-SHA256="$(sha256sum "$OUT" | awk '{print $1}')"
+if [[ ! -f "$INSTALLER" ]]; then
+  echo "install.ps1 not found at $INSTALLER" >&2
+  exit 1
+fi
 
 echo "Creating GitHub release $VERSION..."
-gh release create "$VERSION" "$OUT" \
+gh release create "$VERSION" "$OUT" "$INSTALLER" \
   --repo pre/rootaika \
   --title "$VERSION" \
   --notes "rootaika Windows client $VERSION"
