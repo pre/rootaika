@@ -22,7 +22,7 @@ now mirrors the Go server's full client API plus the admin Settings page:
 | `GET  /api/v1/warning-sound` | client/admin | Streams the admin-uploaded MP3 (`404` when none set) |
 | `GET  /api/v1/board/today` | client/admin | Per-device active minutes for today + `refresh_seconds` |
 | `GET  /api/v1/lock` | client/admin | Global lock status `{locked,locked_count,total_count}` over assigned devices |
-| `POST /api/v1/lock` / `POST /api/v1/unlock` | client/admin | Toggle / release all assigned-device locks (same path the physical button drives) |
+| `POST /api/v1/lock` / `POST /api/v1/unlock` | client/admin | Toggle / release all assigned-device locks. The toggle locks with a default `rootaika` message and a 60 s pre-lock warning (banner + sound); the physical button locks immediately with the admin lock-all message |
 | `GET  /settings` | client/admin | Admin Settings page (read-only for the client role) |
 | `POST /admin/*` | admin only | Settings mutations: devices (assign/lock/unlock/delete), users (create/rename), global settings, categories, MP3 upload |
 | `GET  /` | client/admin | Live dashboard (per-device today minutes, lock state, 10s refresh) |

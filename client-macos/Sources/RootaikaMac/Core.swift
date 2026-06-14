@@ -29,6 +29,12 @@ actor Core {
     // Lock / warning state.
     private var warned: Bool = false
     private var warningTask: Task<Void, Never>?
+    // Last lock intent already applied. The RP2040 server short-polls (answers
+    // every poll immediately, ignoring wait=), so applyConfig runs ~once a second
+    // with an unchanged lock state. Without this guard each poll would relaunch
+    // the warning countdown (restarting the sound) and rebuild the lock windows
+    // (green flicker). We act only when the intent actually changes.
+    private var lastLockSignature: String?
 
     init(config: Config, board: BoardClienting, probe: ActivityProbing, lock: LockControlling) {
         self.config = config
@@ -249,6 +255,17 @@ actor Core {
     // MARK: Lock state
 
     func applyLockState(locked: Bool, message: String, warningSeconds: Int) {
+        // Edge-trigger on the lock intent. The server short-polls, so this is
+        // called repeatedly with an identical state; only a real change should
+        // (re)drive the overlay, otherwise the sound restarts and the overlay
+        // flickers every poll. The warned flag is part of the signature so that
+        // a warning -> lock transition we drove ourselves is not seen as "new".
+        let signature = "\(locked)|\(warningSeconds)|\(warned)|\(message)"
+        if signature == lastLockSignature {
+            return
+        }
+        lastLockSignature = signature
+
         if !locked {
             warningTask?.cancel()
             warningTask = nil

@@ -635,9 +635,10 @@ static bool setDeviceLock(int id, bool locked, const char* msg, int warnSeconds)
 }
 
 // toggleAllLocks flips the lock of every ASSIGNED device: if any assigned device
-// is locked, all unlock; otherwise all lock with msg. Mirrors Go's ToggleAllLocks
-// and backs the physical button. Returns the resulting state and affected count.
-static bool toggleAllLocks(const char* msg, int* affectedOut) {
+// is locked, all unlock; otherwise all lock with msg and a warnSeconds pre-lock
+// countdown. Mirrors Go's ToggleAllLocks and backs the POST /api/v1/lock toggle.
+// Returns the resulting state and affected count.
+static bool toggleAllLocks(const char* msg, int warnSeconds, int* affectedOut) {
   int lockedCount = 0, total = 0;
   for (int i = 0; i < g_deviceCount; i++)
     if (isAssigned(g_devices[i])) { total++; if (g_devices[i].locked) lockedCount++; }
@@ -646,9 +647,13 @@ static bool toggleAllLocks(const char* msg, int* affectedOut) {
   for (int i = 0; i < g_deviceCount; i++) {
     if (!isAssigned(g_devices[i])) continue;
     g_devices[i].locked = lock;
-    if (lock) { strncpy(g_devices[i].lockMsg, msg, sizeof(g_devices[i].lockMsg) - 1); g_devices[i].lockMsg[63] = 0; }
-    else g_devices[i].lockMsg[0] = 0;
-    g_devices[i].warnSeconds = 0;
+    if (lock) {
+      strncpy(g_devices[i].lockMsg, msg, sizeof(g_devices[i].lockMsg) - 1); g_devices[i].lockMsg[63] = 0;
+      g_devices[i].warnSeconds = warnSeconds;
+    } else {
+      g_devices[i].lockMsg[0] = 0;
+      g_devices[i].warnSeconds = 0;
+    }
     affected++;
   }
   if (affectedOut) *affectedOut = affected;

@@ -56,6 +56,11 @@ bool     prevPressed  = false;
 uint32_t pressStartMs = 0;
 bool     longFired    = false;
 const uint32_t LONG_PRESS_MS = 1000;
+// Pre-lock warning countdown applied by the POST /api/v1/lock toggle, so a
+// client shows a warning (banner + sound) before the screen locks.
+const int LOCK_TOGGLE_WARN_SECONDS = 60;
+// Default lock-screen message for the POST /api/v1/lock toggle.
+const char LOCK_TOGGLE_MESSAGE[] = "rootaika";
 
 // ---- RGB NeoPixel: breathing, red=locked / green=open ----
 Adafruit_NeoPixel pixel(1, NEOPIXEL, NEO_GRB + NEO_KHZ800);
@@ -366,7 +371,9 @@ void handleLockStatus(WiFiClient& c) {
 
 void handleLockToggle(WiFiClient& c) {
   int affected = 0;
-  bool locked = toggleAllLocks(g_settings.lockAllMessage, &affected);
+  // The toggle locks with a default "rootaika" message and a 60 s pre-lock
+  // warning, so clients show the warning banner + sound before locking.
+  bool locked = toggleAllLocks(LOCK_TOGGLE_MESSAGE, LOCK_TOGGLE_WARN_SECONDS, &affected);
   applyLockLed();
   sendJsonHead(c, 200);
   c.print(F("{\"locked\":")); c.print(locked ? F("true") : F("false"));
