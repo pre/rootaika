@@ -352,6 +352,12 @@
             <td>Uusi <code>/history</code>-sivu näyttää lukitusten historian kahdessa taulukossa. (1) Laitteiden raportoima lukitustila johdetaan append-only-eventtivirrasta SQL-ikkunafunktiolla (<code>LAG</code>): siirtymä <code>state=locked</code>-tilaan on lukitus, siitä pois avaus, toistuvat samat tilat eivät tuota rivejä. (2) Admin- ja taulukomennot tallennetaan uuteen <code>lock_audit</code>-tauluun, johon kirjataan rivi <code>SetDeviceLock</code>, <code>ToggleAllLocks</code> ja <code>UnlockAllLocks</code> -kutsuissa (lähde: admin / taulun nappi / taulun avaus). Molemmat taulukot näkyvät admin- ja client-roolilla (read-only), uusin ensin, enintään 200 riviä.</td>
             <td><span class="status status-done">valmis</span></td>
           </tr>
+          <tr>
+            <td>Globaalin lukitustilan kysely</td>
+            <td>Ei suunnitelmassa.</td>
+            <td>Lukitus on laitekohtainen, mutta taulun nappi operoi globaalilla tilalla: painallus lukitsee tai avaa kaikki rekisteröidyt laitteet. Nappi kysyy nykyisen tilan uudesta endpointista <code>GET /api/v1/lock</code>, joka palauttaa <code>locked</code> (globaali tila), <code>locked_count</code> ja <code>total_count</code>. Globaali tila on "lukittu", jos vähintään yksi assigned-laite on lukittu, sama semantiikka kuin <code>ToggleAllLocks</code>:lla, joten statuskysely ja sitä seuraava toggle pysyvät yhtenäisinä. <code>POST /api/v1/lock</code> (toggle) ja <code>POST /api/v1/unlock</code> säilyvät ennallaan; client-rooli riittää.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
         </tbody>
       </table>
     </section>
