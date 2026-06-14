@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rootaika.macclient</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/rootaika-mac</string>
+    </array>
+
+    <!-- Start at login and re-launch if it exits (crash recovery / kid kills it). -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Throttle relaunch storms. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/rootaika-mac.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/rootaika-mac.err.log</string>
+</dict>
+</plist>
