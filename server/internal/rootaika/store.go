@@ -48,6 +48,45 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// withTx runs fn inside a single transaction on a dedicated pooled connection.
+//
+// It guards against a SQLite failure mode where a client disconnecting
+// mid-write cancels the request context, interrupts ROLLBACK, and leaves the
+// pooled connection stuck inside a transaction. Every later BEGIN on that
+// connection then fails with "cannot start a transaction within a transaction".
+//
+// Prevention: the transaction runs on a context detached from the caller's
+// cancellation (context.WithoutCancel), so a disconnect cannot interrupt
+// BEGIN/COMMIT/ROLLBACK. These writes are small and fast, so ignoring
+// cancellation is safe.
+//
+// Recovery: a defensive ROLLBACK clears any transaction left open on the
+// connection by a previously interrupted request, so the server heals itself
+// without a restart instead of failing every future transaction.
+func (s *Store) withTx(ctx context.Context, fn func(ctx context.Context, tx *sql.Tx) error) error {
+	txCtx := context.WithoutCancel(ctx)
+
+	conn, err := s.db.Conn(txCtx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	// Clear any transaction a previously interrupted request left open on this
+	// pooled connection. A no-op (and harmless error) on a clean connection.
+	_, _ = conn.ExecContext(txCtx, "ROLLBACK")
+
+	tx, err := conn.BeginTx(txCtx, nil)
+	if err != nil {
+		return err
+	}
+	if err := fn(txCtx, tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 PRAGMA foreign_keys = ON;
@@ -243,91 +282,84 @@ func (s *Store) EnsureDevice(ctx context.Context, clientUUID string, now time.Ti
 		return Device{}, errors.New("client_id is required")
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Device{}, err
-	}
-	defer tx.Rollback()
-
-	nowText := formatDBTime(now)
-	result, err := tx.ExecContext(ctx, `
+	var device Device
+	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		nowText := formatDBTime(now)
+		result, err := tx.ExecContext(ctx, `
 INSERT OR IGNORE INTO devices(client_uuid, display_name, registration_status, created_at_utc, last_seen_at_utc)
 VALUES (?, ?, 'unassigned', ?, ?)`,
-		clientUUID, defaultDeviceName(clientUUID), nowText, nowText)
-	if err != nil {
-		return Device{}, err
-	}
+			clientUUID, defaultDeviceName(clientUUID), nowText, nowText)
+		if err != nil {
+			return err
+		}
 
-	device, err := scanDeviceRow(tx.QueryRowContext(ctx, `
+		device, err = scanDeviceRow(tx.QueryRowContext(ctx, `
 SELECT d.id, d.client_uuid, d.display_name, d.user_id, COALESCE(u.name, ''),
        d.registration_status, d.created_at_utc, d.last_seen_at_utc
 FROM devices d
 LEFT JOIN users u ON u.id = d.user_id
 WHERE d.client_uuid = ?`, clientUUID))
-	if err != nil {
-		return Device{}, err
-	}
-
-	if _, err := tx.ExecContext(ctx, `UPDATE devices SET last_seen_at_utc = ? WHERE id = ?`, nowText, device.ID); err != nil {
-		return Device{}, err
-	}
-	device.LastSeenAt = now.UTC()
-
-	affected, _ := result.RowsAffected()
-	if affected > 0 {
-		settings, err := settingsFromTx(ctx, tx)
 		if err != nil {
-			return Device{}, err
+			return err
 		}
-		if _, err := tx.ExecContext(ctx, `
+
+		if _, err := tx.ExecContext(ctx, `UPDATE devices SET last_seen_at_utc = ? WHERE id = ?`, nowText, device.ID); err != nil {
+			return err
+		}
+		device.LastSeenAt = now.UTC()
+
+		affected, _ := result.RowsAffected()
+		if affected > 0 {
+			settings, err := settingsFromTx(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `
 INSERT OR IGNORE INTO device_config(device_id, idle_threshold_seconds, upload_interval_seconds, poll_interval_seconds)
 VALUES (?, ?, ?, ?)`,
-			device.ID, settings.IdleThresholdSeconds, settings.UploadIntervalSeconds, settings.PollIntervalSeconds); err != nil {
-			return Device{}, err
+				device.ID, settings.IdleThresholdSeconds, settings.UploadIntervalSeconds, settings.PollIntervalSeconds); err != nil {
+				return err
+			}
+		} else {
+			if err := ensureDeviceConfigTx(ctx, tx, device.ID); err != nil {
+				return err
+			}
 		}
-	} else {
-		if err := ensureDeviceConfigTx(ctx, tx, device.ID); err != nil {
-			return Device{}, err
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return Device{}, err
 	}
 	return device, nil
 }
 
 func (s *Store) InsertEvents(ctx context.Context, deviceID int64, events []EventInput, now time.Time) (int, int, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer tx.Rollback()
-
 	accepted := 0
 	ignored := 0
-	receivedAt := formatDBTime(now)
-	for _, event := range events {
-		processName := event.ProcessName
-		if event.State != StateActive {
-			processName = ""
-		}
-		result, err := tx.ExecContext(ctx, `
+	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		receivedAt := formatDBTime(now)
+		for _, event := range events {
+			processName := event.ProcessName
+			if event.State != StateActive {
+				processName = ""
+			}
+			result, err := tx.ExecContext(ctx, `
 INSERT OR IGNORE INTO events(event_uuid, device_id, type, state, occurred_at_utc, process_name, sequence, received_at_utc)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			event.EventUUID, deviceID, event.Type, event.State, formatDBTime(event.OccurredAt), processName, event.Sequence, receivedAt)
-		if err != nil {
-			return 0, 0, err
+				event.EventUUID, deviceID, event.Type, event.State, formatDBTime(event.OccurredAt), processName, event.Sequence, receivedAt)
+			if err != nil {
+				return err
+			}
+			rows, _ := result.RowsAffected()
+			if rows == 1 {
+				accepted++
+			} else {
+				ignored++
+			}
 		}
-		rows, _ := result.RowsAffected()
-		if rows == 1 {
-			accepted++
-		} else {
-			ignored++
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return 0, 0, err
 	}
 	return accepted, ignored, nil
@@ -501,22 +533,18 @@ UPDATE devices SET display_name = ?, user_id = ?, registration_status = ? WHERE 
 }
 
 func (s *Store) DeleteDevice(ctx context.Context, deviceID int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	for _, query := range []string{
-		`DELETE FROM events WHERE device_id = ?`,
-		`DELETE FROM device_config WHERE device_id = ?`,
-		`DELETE FROM devices WHERE id = ?`,
-	} {
-		if _, err := tx.ExecContext(ctx, query, deviceID); err != nil {
-			return err
+	return s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		for _, query := range []string{
+			`DELETE FROM events WHERE device_id = ?`,
+			`DELETE FROM device_config WHERE device_id = ?`,
+			`DELETE FROM devices WHERE id = ?`,
+		} {
+			if _, err := tx.ExecContext(ctx, query, deviceID); err != nil {
+				return err
+			}
 		}
-	}
-	return tx.Commit()
+		return nil
+	})
 }
 
 func (s *Store) Settings(ctx context.Context) (Settings, error) {
@@ -530,38 +558,34 @@ func (s *Store) UpdateSettings(ctx context.Context, settings Settings, now time.
 		return errors.New("settings must be positive integers")
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	values := map[string]int{
-		"idle_threshold_seconds":    settings.IdleThresholdSeconds,
-		"upload_interval_seconds":   settings.UploadIntervalSeconds,
-		"poll_interval_seconds":     settings.PollIntervalSeconds,
-		"max_countable_gap_seconds": settings.MaxCountableGapSeconds,
-		"chart_y_max_minutes":       settings.ChartYMaxMinutes,
-		"board_refresh_seconds":     settings.BoardRefreshSeconds,
-		"debug_mode":                boolToInt(settings.DebugMode),
-		"debug_unassigned_clients":  boolToInt(settings.DebugUnassignedClients),
-	}
-	for key, value := range values {
-		if _, err := tx.ExecContext(ctx, `
+	return s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		values := map[string]int{
+			"idle_threshold_seconds":    settings.IdleThresholdSeconds,
+			"upload_interval_seconds":   settings.UploadIntervalSeconds,
+			"poll_interval_seconds":     settings.PollIntervalSeconds,
+			"max_countable_gap_seconds": settings.MaxCountableGapSeconds,
+			"chart_y_max_minutes":       settings.ChartYMaxMinutes,
+			"board_refresh_seconds":     settings.BoardRefreshSeconds,
+			"debug_mode":                boolToInt(settings.DebugMode),
+			"debug_unassigned_clients":  boolToInt(settings.DebugUnassignedClients),
+		}
+		for key, value := range values {
+			if _, err := tx.ExecContext(ctx, `
 INSERT INTO settings(key, value, updated_at_utc) VALUES (?, ?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at_utc = excluded.updated_at_utc`,
-			key, strconv.Itoa(value), formatDBTime(now)); err != nil {
-			return err
+				key, strconv.Itoa(value), formatDBTime(now)); err != nil {
+				return err
+			}
 		}
-	}
 
-	if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, `
 UPDATE device_config
 SET idle_threshold_seconds = ?, upload_interval_seconds = ?, poll_interval_seconds = ?`,
-		settings.IdleThresholdSeconds, settings.UploadIntervalSeconds, settings.PollIntervalSeconds); err != nil {
-		return err
-	}
-	return tx.Commit()
+			settings.IdleThresholdSeconds, settings.UploadIntervalSeconds, settings.PollIntervalSeconds); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (s *Store) Categories(ctx context.Context) ([]ProgramCategory, error) {

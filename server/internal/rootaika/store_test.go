@@ -670,3 +670,49 @@ func TestParseAndFormatDBTimeRoundTrip(t *testing.T) {
 		t.Fatalf("invalid input should yield zero time")
 	}
 }
+
+// TestWithTxRecoversFromLeakedTransaction reproduces the production failure
+// where a client disconnect left a pooled connection stuck inside a SQLite
+// transaction, so every later BEGIN failed with "cannot start a transaction
+// within a transaction". It pins the pool to a single connection, poisons it
+// with a raw BEGIN, then verifies a normal store write heals the connection
+// instead of failing.
+func TestWithTxRecoversFromLeakedTransaction(t *testing.T) {
+	dbPath := "file:" + t.TempDir() + "/recover.db"
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	// Force the pool to reuse one connection so the poisoned one is handed back.
+	store.db.SetMaxOpenConns(1)
+
+	ctx := context.Background()
+
+	// Poison the single pooled connection: open a transaction and return the
+	// connection to the pool without committing or rolling back.
+	conn, err := store.db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("grab conn: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
+		t.Fatalf("begin poison tx: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("return poisoned conn: %v", err)
+	}
+
+	// Sanity check: a naive BeginTx on the poisoned connection still fails,
+	// proving the connection really is stuck (guards against the test silently
+	// passing if pool behavior changes).
+	if naiveTx, naiveErr := store.db.BeginTx(ctx, nil); naiveErr == nil {
+		_ = naiveTx.Rollback()
+		t.Fatalf("expected poisoned connection to fail naive BeginTx")
+	}
+
+	// The real code path must recover and succeed on the same connection.
+	if _, err := store.EnsureDevice(ctx, "recover-uuid", fixedNow()); err != nil {
+		t.Fatalf("EnsureDevice did not recover from leaked transaction: %v", err)
+	}
+}

@@ -233,6 +233,12 @@
         </thead>
         <tbody>
           <tr>
+            <td>SQLite-transaktion vuototilanteesta elpyminen</td>
+            <td>Ei suunnitelmassa.</td>
+            <td>Kun clientin yhteys katkesi kesken kirjoituksen (esim. serverin IP vaihtui), peruuntunut pyyntö-context keskeytti <code>ROLLBACK</code>in ja jätti poolin yhteyden transaktioon, jolloin jokainen seuraava pyyntö kaatui virheeseen <code>cannot start a transaction within a transaction</code>. Lisätty <code>withTx</code>-helper (<code>store.go</code>), jota kaikki transaktiot käyttävät: ajaa transaktion <code>context.WithoutCancel</code>-contextilla (clientin katkeaminen ei keskeytä BEGIN/COMMIT/ROLLBACK) ja ajaa puhdistavan <code>ROLLBACK</code>in ennen jokaista BEGINiä, jolloin aiemmin myrkyttynyt yhteys elpyy ilman serverin uudelleenkäynnistystä.</td>
+            <td><span class="status status-done">valmis</span></td>
+          </tr>
+          <tr>
             <td>Agentin näkyvyys</td>
             <td>Agentti ei näy taskbarissa eikä alt-tabissa.</td>
             <td>Konsoli-ikkuna piilotetaan oletuksena. Palvelinpäästä asetettava <code>debug_mode</code> tuo konsolin näkyviin devausta varten. Todennettu Windowsilla.</td>
