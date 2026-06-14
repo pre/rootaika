@@ -222,8 +222,16 @@ void handleClientConfig(WiFiClient& c, const char* path) {
       recordDeviceStatus(d, status);
   }
 
+  // The client also reports its running version in the same poll (OTA update).
+  char clientVer[24] = "";
+  if (getParam(path, "version", clientVer, sizeof(clientVer)) && clientVer[0])
+    recordDeviceVersion(d, clientVer);
+
   char ver[20]; configVersionFor(*d, ver, sizeof(ver));
   char sv[16];  soundVersionStr(sv, sizeof(sv));
+  // Effective desired-version triple the client should update to ("" = none).
+  const char *dVer, *dArtifact, *dSha;
+  resolveDesiredVersion(*d, &dVer, &dArtifact, &dSha);
 
   sendJsonHead(c, 200);
   c.print(F("{\"client_id\":\"")); jsonEscape(c, clientId);
@@ -237,6 +245,9 @@ void handleClientConfig(WiFiClient& c, const char* path) {
   c.print(F(",\"lock_message\":\"")); if (d->locked) jsonEscape(c, d->lockMsg);
   c.print(F("\",\"warning_seconds\":")); c.print(d->locked ? d->warnSeconds : 0);
   c.print(F(",\"warning_sound_version\":\"")); c.print(sv);
+  c.print(F("\",\"desired_version\":\"")); jsonEscape(c, dVer);
+  c.print(F("\",\"artifact_name\":\"")); jsonEscape(c, dArtifact);
+  c.print(F("\",\"sha256\":\"")); jsonEscape(c, dSha);
   c.print(F("\",\"categories\":["));
   for (int i = 0; i < g_categoryCount; i++) {
     if (i) c.print(',');
@@ -390,6 +401,15 @@ void adminSettings(WiFiClient& c, const char* body) {
   s.debug = formCheckbox(body, "debug_mode");
   s.debugUnassigned = formCheckbox(body, "debug_unassigned_clients");
   updateSettings(s);
+
+  // Global OTA desired-version triple is independent of the numeric validation
+  // above, so it is applied separately (any field may be empty = no update).
+  char ver[24], artifact[64], sha[72];
+  formField(body, "desired_client_version", ver, sizeof(ver));
+  formField(body, "client_artifact_name", artifact, sizeof(artifact));
+  formField(body, "client_sha256", sha, sizeof(sha));
+  setGlobalDesiredVersion(ver, artifact, sha);
+
   sendRedirect(c, "/settings#settings");
 }
 
@@ -432,6 +452,17 @@ void adminDeviceUnlock(WiFiClient& c, int id) {
 void adminDeviceDelete(WiFiClient& c, int id) {
   deleteDevice(id);
   applyLockLed();
+  sendRedirect(c, "/settings#devices");
+}
+
+// adminDeviceVersion sets/clears a device's per-device OTA override triple. An
+// empty version clears all three, so the device inherits the global triple.
+void adminDeviceVersion(WiFiClient& c, int id, const char* body) {
+  char ver[24], artifact[64], sha[72];
+  formField(body, "desired_version", ver, sizeof(ver));
+  formField(body, "desired_artifact_name", artifact, sizeof(artifact));
+  formField(body, "desired_sha256", sha, sizeof(sha));
+  setDeviceDesiredVersion(id, ver, artifact, sha);
   sendRedirect(c, "/settings#devices");
 }
 
@@ -594,6 +625,7 @@ void routeAdmin(WiFiClient& c, const char* path, const char* body) {
   if (!strcmp(seg0, "devices") && id > 0 && !strcmp(seg2, "lock"))       { adminDeviceLock(c, id, body); return; }
   if (!strcmp(seg0, "devices") && id > 0 && !strcmp(seg2, "unlock"))     { adminDeviceUnlock(c, id); return; }
   if (!strcmp(seg0, "devices") && id > 0 && !strcmp(seg2, "delete"))     { adminDeviceDelete(c, id); return; }
+  if (!strcmp(seg0, "devices") && id > 0 && !strcmp(seg2, "version"))    { adminDeviceVersion(c, id, body); return; }
   if (!strcmp(seg0, "categories") && id == 0)                           { adminCreateCategory(c, body); return; }
   if (!strcmp(seg0, "categories") && id > 0 && !strcmp(seg2, "delete"))  { adminDeleteCategory(c, id); return; }
 
@@ -760,6 +792,12 @@ void setup() {
     Serial.print(F("[nappi] connected, IP: ")); Serial.println(WiFi.localIP());
     if (WiFi.startMDNS(HOSTNAME, "http", 80))
       Serial.println(F("[nappi] mDNS -> http://nappi.local/"));
+    // SNTP for version-report timestamps (the board has no RTC). Best-effort:
+    // give the ESP-AT firmware a few seconds to fetch time, then carry on.
+    WiFi.sntp("pool.ntp.org", "time.nist.gov");
+    for (int i = 0; i < 10 && !clockSync(); i++) delay(500);
+    if (g_clockEpochBase) { char t[24]; nowUtcString(t, sizeof(t)); Serial.print(F("[nappi] clock synced: ")); Serial.println(t); }
+    else                    Serial.println(F("[nappi] clock NOT synced (version timestamps blank until NTP responds)"));
     server.begin(5, 3);
     Serial.println(F("[nappi] rootaika server on :80"));
   } else {
@@ -785,6 +823,15 @@ void loop() {
   prevPressed = buttonPressed;
 
   updateLed();
+
+  // Keep the NTP clock fresh: re-sync hourly once synced, retry every 30 s while
+  // still unsynced. Gated on millis() so we never spam the ESP-AT per loop.
+  static uint32_t lastClockAttemptMs = 0;
+  uint32_t clockInterval = g_clockEpochBase ? CLOCK_RESYNC_MS : 30000UL;
+  if (millis() - lastClockAttemptMs >= clockInterval) {
+    lastClockAttemptMs = millis();
+    clockSync();
+  }
 
   WiFiClient client = server.available();
   if (client) handleClient(client);

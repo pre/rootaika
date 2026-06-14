@@ -1,1 +1,1 @@
-{"idle": 60, "upload": 60, "poll": 30, "maxGap": 300, "chartYMax": 720, "boardRefresh": 60, "debug": false, "debugUnassigned": false, "soundVer": 0, "nextDeviceId": 7, "nextUserId": 1, "nextCategoryId": 1}
+{"idle": 60, "upload": 60, "poll": 30, "maxGap": 300, "chartYMax": 720, "boardRefresh": 60, "debug": false, "debugUnassigned": false, "soundVer": 0, "nextDeviceId": 7, "nextUserId": 1, "nextCategoryId": 1, "desiredVersion": "", "artifactName": "", "sha256": ""}

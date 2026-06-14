@@ -18,7 +18,7 @@ now mirrors the Go server's full client API plus the admin Settings page:
 | Endpoint | Role | Notes |
 |---|---|---|
 | `POST /api/v1/events/batch` | client/admin | Ingest `activity_observed` events → append to a LittleFS JSONL log (a RAM dedup ring drops retried `event_id`s) |
-| `GET  /api/v1/client/config` | client/admin | Per-device config + lock state + categories + `warning_sound_version`. `config_version` is the same FNV-1a fingerprint the Go server emits. **Short-poll** (responds immediately, see below) |
+| `GET  /api/v1/client/config` | client/admin | Per-device config + lock state + categories + `warning_sound_version` + the OTA `desired_version`/`artifact_name`/`sha256` triple. The client reports its running version back via `&version=`. `config_version` is the same FNV-1a fingerprint the Go server emits. **Short-poll** (responds immediately, see below) |
 | `GET  /api/v1/warning-sound` | client/admin | Streams the admin-uploaded MP3 (`404` when none set) |
 | `GET  /api/v1/board/today` | client/admin | Per-device active minutes for today + `refresh_seconds` |
 | `GET  /api/v1/lock` | client/admin | Global lock status `{locked,locked_count,total_count}` over assigned devices |
@@ -51,6 +51,36 @@ bumps an integer `soundVer` that becomes the `warning_sound_version` clients see
 The code is split into `RootaikaServer.ino` (HTTP routing + handlers),
 `storage.h` (data model, LittleFS persistence, lock/usage/config-version logic),
 and `html.h` (Settings page rendering).
+
+### Client OTA auto-update (server side)
+
+The board is the server half of the Windows client's over-the-air update (see
+`plans/auto-update-suunnitelma.html`). It does **not** download or build
+anything; it only *declares* the version the client should run and *records*
+what the client reports:
+
+- **Desired version is a triple** `(desired_version, artifact_name, sha256)`.
+  Set it **globally** in the Settings page, or **per device** in the devices
+  table (an empty per-device version inherits the global triple). The download
+  origin (GitHub owner/repo) is fixed in the client binary and is never
+  server-controlled; only the tag, asset name, and hash come from here.
+- **Travels on the existing config poll** — no new endpoint. The client sends
+  its running version as `GET /api/v1/client/config?...&version=v1.2.0`; the
+  board stores it as the device's `lastVersion`/`lastVersionAt` and returns the
+  resolved desired triple in the same JSON response. The client compares and
+  self-swaps; the board's role ends at "declare + record".
+- **Reported version is shown** in the devices table (`Versio` column) with the
+  time it was last reported and a `→ <ver>` marker when a per-device override is
+  active.
+
+### Deliberate deviation: NTP clock
+
+The Go server timestamps the reported version with its own wall clock. The board
+has **no RTC**, so it pulls UTC from the ESP-AT firmware's SNTP client
+(`WiFi.sntp()` / `WiFi.getTime()`) once at boot and re-syncs hourly, then
+extrapolates with `millis()`. `lastVersionAt` uses this clock; until NTP first
+responds it is left blank rather than guessed. (Usage/"today" still derive from
+client-supplied event timestamps, not this clock.)
 
 ## Deliberate deviations from the Go server
 

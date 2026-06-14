@@ -23,6 +23,12 @@ struct Settings {
   bool debug = false, debugUnassigned = false;
   int  soundVer = 0;                 // bumped on every MP3 upload; 0 = none uploaded
   int  nextDeviceId = 1, nextUserId = 1, nextCategoryId = 1;
+  // OTA auto-update: the desired client version triple (global default). The
+  // download origin (GitHub owner/repo) is fixed in the client binary; only the
+  // tag, asset name, and SHA256 are server-controlled. Empty = no update wanted.
+  char desiredVersion[24] = "";      // release tag, e.g. v1.2.0
+  char artifactName[64]   = "";      // asset name, e.g. rootaika.exe
+  char sha256[72]         = "";      // hex SHA256 of the asset (64 chars)
 };
 
 struct Device {
@@ -36,6 +42,14 @@ struct Device {
   char lastStatus[8] = "";           // active/idle/locked, client-reported
   int  idle = 60, upload = 60, poll = 30;
   char lastSeen[24] = "";            // newest event occurred_at (no RTC on board)
+  // OTA auto-update: per-device override of the desired version triple. All empty
+  // = inherit the global Settings triple. lastVersion is what the client reported
+  // it is running, with the NTP wall-clock time it last reported it.
+  char desiredVersion[24] = "";
+  char desiredArtifact[64] = "";
+  char desiredSha256[72]  = "";
+  char lastVersion[24]    = "";      // client-reported running version
+  char lastVersionAt[24]  = "";      // NTP UTC time of that report ("" if clock unsynced)
 };
 
 struct User {
@@ -63,6 +77,54 @@ int      g_categoryCount = 0;
 char     g_dedup[DEDUP_RING][40];
 int      g_dedupHead = 0;
 bool     g_dedupFull = false;
+
+// ---------- wall clock (NTP, no on-board RTC) ----------
+// The board has no RTC. clockSync() pulls UTC epoch seconds from the ESP-AT
+// SNTP client once WiFi is up, then we extrapolate with millis() and re-sync
+// periodically. g_clockEpochBase is the epoch at g_clockMillisBase; 0 = never
+// synced. This gives version reports a real timestamp without an AT round-trip
+// on every config poll.
+uint32_t g_clockEpochBase  = 0;
+uint32_t g_clockMillisBase = 0;
+const uint32_t CLOCK_RESYNC_MS = 3600000UL;   // re-sync hourly
+
+// clockSync asks the ESP-AT firmware for SNTP time. Returns true once synced.
+// WiFi.sntp()/getTime() come from WiFiEspAT (included by the .ino before this).
+static bool clockSync() {
+  unsigned long t = WiFi.getTime();           // epoch seconds, 0 if not ready
+  if (t < 1700000000UL) return false;         // sanity: reject pre-2023 (unsynced)
+  g_clockEpochBase  = (uint32_t)t;
+  g_clockMillisBase = millis();
+  return true;
+}
+
+// clockNowEpoch returns the current UTC epoch seconds, or 0 if never synced.
+static uint32_t clockNowEpoch() {
+  if (g_clockEpochBase == 0) return 0;
+  return g_clockEpochBase + (millis() - g_clockMillisBase) / 1000UL;
+}
+
+// nowUtcString formats the current UTC time as RFC3339 "YYYY-MM-DDTHH:MM:SSZ"
+// into out, or writes "" when the clock has never synced.
+static void nowUtcString(char* out, int outsz) {
+  uint32_t ep = clockNowEpoch();
+  if (ep == 0 || outsz < 21) { if (outsz > 0) out[0] = 0; return; }
+  long days = ep / 86400L;
+  int secOfDay = ep % 86400L;
+  int hh = secOfDay / 3600, mm = (secOfDay % 3600) / 60, ss = secOfDay % 60;
+  // civil-from-days (Howard Hinnant's algorithm), epoch 1970-01-01.
+  long z = days + 719468;
+  long era = (z >= 0 ? z : z - 146096) / 146097;
+  unsigned doe = (unsigned)(z - era * 146097);
+  unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  long y = (long)yoe + era * 400;
+  unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  unsigned mp = (5 * doy + 2) / 153;
+  unsigned d = doy - (153 * mp + 2) / 5 + 1;
+  unsigned m = mp + (mp < 10 ? 3 : -9);
+  y += (m <= 2);
+  snprintf(out, outsz, "%04ld-%02u-%02uT%02d:%02d:%02dZ", y, m, d, hh, mm, ss);
+}
 
 // ---------- small helpers ----------
 static bool isAssigned(const Device& d) { return d.userId > 0; }
@@ -117,6 +179,9 @@ static void loadSettings() {
     g_settings.nextDeviceId    = doc["nextDeviceId"]    | g_settings.nextDeviceId;
     g_settings.nextUserId      = doc["nextUserId"]      | g_settings.nextUserId;
     g_settings.nextCategoryId  = doc["nextCategoryId"]  | g_settings.nextCategoryId;
+    strncpy(g_settings.desiredVersion, doc["desiredVersion"] | "", sizeof(g_settings.desiredVersion) - 1);
+    strncpy(g_settings.artifactName,   doc["artifactName"]   | "", sizeof(g_settings.artifactName) - 1);
+    strncpy(g_settings.sha256,         doc["sha256"]         | "", sizeof(g_settings.sha256) - 1);
   }
   f.close();
 }
@@ -143,6 +208,11 @@ static void loadDevices() {
       d.upload = o["upload"] | g_settings.upload;
       d.poll   = o["poll"]   | g_settings.poll;
       strncpy(d.lastSeen, o["lastSeen"] | "", sizeof(d.lastSeen) - 1);
+      strncpy(d.desiredVersion,  o["desiredVersion"]  | "", sizeof(d.desiredVersion) - 1);
+      strncpy(d.desiredArtifact, o["desiredArtifact"] | "", sizeof(d.desiredArtifact) - 1);
+      strncpy(d.desiredSha256,   o["desiredSha256"]   | "", sizeof(d.desiredSha256) - 1);
+      strncpy(d.lastVersion,     o["lastVersion"]     | "", sizeof(d.lastVersion) - 1);
+      strncpy(d.lastVersionAt,   o["lastVersionAt"]   | "", sizeof(d.lastVersionAt) - 1);
       if (d.id > 0 && d.uuid[0]) g_deviceCount++;
     }
   }
@@ -202,7 +272,10 @@ static void saveSettings() {
   f.print(F(",\"nextDeviceId\":"));    f.print(g_settings.nextDeviceId);
   f.print(F(",\"nextUserId\":"));      f.print(g_settings.nextUserId);
   f.print(F(",\"nextCategoryId\":"));  f.print(g_settings.nextCategoryId);
-  f.print(F("}"));
+  f.print(F(",\"desiredVersion\":\"")); jsonEscape(f, g_settings.desiredVersion);
+  f.print(F("\",\"artifactName\":\"")); jsonEscape(f, g_settings.artifactName);
+  f.print(F("\",\"sha256\":\""));       jsonEscape(f, g_settings.sha256);
+  f.print(F("\"}"));
   f.close();
 }
 
@@ -225,6 +298,11 @@ static void saveDevices() {
     f.print(F(",\"upload\":")); f.print(d.upload);
     f.print(F(",\"poll\":")); f.print(d.poll);
     f.print(F(",\"lastSeen\":\"")); jsonEscape(f, d.lastSeen);
+    f.print(F("\",\"desiredVersion\":\"")); jsonEscape(f, d.desiredVersion);
+    f.print(F("\",\"desiredArtifact\":\"")); jsonEscape(f, d.desiredArtifact);
+    f.print(F("\",\"desiredSha256\":\"")); jsonEscape(f, d.desiredSha256);
+    f.print(F("\",\"lastVersion\":\"")); jsonEscape(f, d.lastVersion);
+    f.print(F("\",\"lastVersionAt\":\"")); jsonEscape(f, d.lastVersionAt);
     f.print(F("\"}"));
   }
   f.print(']');
@@ -298,6 +376,30 @@ static void recordDeviceStatus(Device* d, const char* status) {
   saveDevices();
 }
 
+// recordDeviceVersion stores the client-reported running version with the NTP
+// wall-clock time of the report. Only persists when the value actually changes,
+// to avoid a LittleFS write on every poll (the timestamp alone is not a reason
+// to rewrite). Mirrors Go's Store.RecordDeviceVersion (sans per-poll churn).
+static void recordDeviceVersion(Device* d, const char* version) {
+  if (!d || !version[0]) return;
+  if (strncmp(d->lastVersion, version, sizeof(d->lastVersion) - 1) == 0) return;
+  strncpy(d->lastVersion, version, sizeof(d->lastVersion) - 1);
+  d->lastVersion[sizeof(d->lastVersion) - 1] = 0;
+  nowUtcString(d->lastVersionAt, sizeof(d->lastVersionAt));
+  saveDevices();
+}
+
+// resolveDesiredVersion picks the effective update triple for a device: the
+// per-device override when its desiredVersion is set, otherwise the global one.
+// Mirrors Go's per-device-over-global resolution in Store.ClientConfig.
+static void resolveDesiredVersion(const Device& d, const char** ver, const char** artifact, const char** sha) {
+  if (d.desiredVersion[0]) {
+    *ver = d.desiredVersion; *artifact = d.desiredArtifact; *sha = d.desiredSha256;
+  } else {
+    *ver = g_settings.desiredVersion; *artifact = g_settings.artifactName; *sha = g_settings.sha256;
+  }
+}
+
 static void updateDeviceLastSeen(Device* d, const char* occurredAt) {
   if (!d || !occurredAt[0]) return;
   // keep the lexicographically-latest RFC3339 timestamp (UTC, fixed width)
@@ -338,6 +440,30 @@ static bool updateDevice(int id, const char* displayName, int userId) {
   d->userId = userId;  // assigned status derives from userId
   saveDevices();
   return true;
+}
+
+// setDeviceDesiredVersion sets (or clears) a device's per-device update triple.
+// Empty version clears all three, so the device falls back to the global triple.
+static bool setDeviceDesiredVersion(int id, const char* version, const char* artifact, const char* sha) {
+  Device* d = deviceById(id);
+  if (!d) return false;
+  if (version[0]) {
+    strncpy(d->desiredVersion,  version,  sizeof(d->desiredVersion) - 1);  d->desiredVersion[sizeof(d->desiredVersion) - 1] = 0;
+    strncpy(d->desiredArtifact, artifact, sizeof(d->desiredArtifact) - 1); d->desiredArtifact[sizeof(d->desiredArtifact) - 1] = 0;
+    strncpy(d->desiredSha256,   sha,      sizeof(d->desiredSha256) - 1);   d->desiredSha256[sizeof(d->desiredSha256) - 1] = 0;
+  } else {
+    d->desiredVersion[0] = 0; d->desiredArtifact[0] = 0; d->desiredSha256[0] = 0;
+  }
+  saveDevices();
+  return true;
+}
+
+// setGlobalDesiredVersion applies the global update triple (settings section).
+static void setGlobalDesiredVersion(const char* version, const char* artifact, const char* sha) {
+  strncpy(g_settings.desiredVersion, version,  sizeof(g_settings.desiredVersion) - 1); g_settings.desiredVersion[sizeof(g_settings.desiredVersion) - 1] = 0;
+  strncpy(g_settings.artifactName,   artifact, sizeof(g_settings.artifactName) - 1);   g_settings.artifactName[sizeof(g_settings.artifactName) - 1] = 0;
+  strncpy(g_settings.sha256,         sha,      sizeof(g_settings.sha256) - 1);         g_settings.sha256[sizeof(g_settings.sha256) - 1] = 0;
+  saveSettings();
 }
 
 // purgeDeviceEvents rewrites events.jsonl dropping the deleted device's lines so

@@ -77,10 +77,10 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
 
   // ---- devices ----
   c.print(F("<section id=devices><h2>Laitteet</h2><table><thead><tr>"
-            "<th>ID</th><th>Nimi</th><th>UUID</th><th>K\xC3\xA4ytt\xC3\xA4j\xC3\xA4</th><th>Tila</th><th>Viimeksi</th><th>Admin</th>"
+            "<th>ID</th><th>Nimi</th><th>UUID</th><th>K\xC3\xA4ytt\xC3\xA4j\xC3\xA4</th><th>Tila</th><th>Viimeksi</th><th>Versio</th><th>Admin</th>"
             "</tr></thead><tbody>"));
   if (g_deviceCount == 0)
-    c.print(F("<tr><td colspan=7 class=muted>Ei laitteita.</td></tr>"));
+    c.print(F("<tr><td colspan=8 class=muted>Ei laitteita.</td></tr>"));
   for (int i = 0; i < g_deviceCount; i++) {
     Device& d = g_devices[i];
     c.print(F("<tr><td>")); c.print(d.id);
@@ -92,6 +92,17 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
     c.print(F("</td><td>")); c.print(isAssigned(d) ? F("assigned") : F("unassigned"));
     c.print(F("<br><span class=muted>")); c.print(lockStateText(d)); c.print(F("</span>"));
     c.print(F("</td><td>")); htmlEscape(c, d.lastSeen[0] ? d.lastSeen : "-");
+    // reported running version + (per-device override indicator)
+    c.print(F("</td><td>"));
+    if (d.lastVersion[0]) {
+      c.print(F("<code>")); htmlEscape(c, d.lastVersion); c.print(F("</code>"));
+      if (d.lastVersionAt[0]) { c.print(F("<br><span class=muted>")); htmlEscape(c, d.lastVersionAt); c.print(F("</span>")); }
+    } else {
+      c.print(F("<span class=muted>-</span>"));
+    }
+    if (d.desiredVersion[0]) {
+      c.print(F("<br><span class=muted>\xE2\x86\x92 ")); htmlEscape(c, d.desiredVersion); c.print(F("</span>"));
+    }
     c.print(F("</td><td class=actions>"));
     if (readOnly) {
       c.print(F("<span class=muted>read-only</span>"));
@@ -117,6 +128,16 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
       c.print(F("/unlock'><button type=submit>Unlock</button></form>"));
       c.print(F("<form method=post action='/admin/devices/")); c.print(d.id);
       c.print(F("/delete'><button class=secondary type=submit onclick=\"return confirm('Poistetaanko laite ja sen tapahtumat pysyv\xC3\xA4sti?')\">Poista</button></form>"));
+      // per-device OTA version override (empty version = inherit global triple)
+      c.print(F("<form method=post action='/admin/devices/")); c.print(d.id);
+      c.print(F("/version' class=stack>"
+                "<input name=desired_version value='")); htmlEscape(c, d.desiredVersion);
+      c.print(F("' placeholder='versio (tyhj\xC3\xA4=globaali)' aria-label='Haluttu versio'>"
+                "<input name=desired_artifact_name value='")); htmlEscape(c, d.desiredArtifact);
+      c.print(F("' placeholder='artifakti' aria-label='Artifaktin nimi'>"
+                "<input name=desired_sha256 value='")); htmlEscape(c, d.desiredSha256);
+      c.print(F("' placeholder='sha256' aria-label='SHA256'>"
+                "<button class=secondary type=submit>Aseta versio</button></form>"));
     }
     c.print(F("</td></tr>"));
   }
@@ -169,6 +190,19 @@ static void renderSettingsPage(WiFiClient& c, bool admin) {
   if (g_settings.debugUnassigned) c.print(F(" checked"));
   if (readOnly) c.print(F(" disabled"));
   c.print(F("> Debug-tila rekister\xC3\xB6im\xC3\xA4tt\xC3\xB6mille</label>"));
+  // global OTA desired-version triple (client auto-update). Per-device overrides
+  // live in the devices table above. Empty version = no update wanted.
+  auto textField = [&](const __FlashStringHelper* label, const char* name, const char* value, const __FlashStringHelper* placeholder) {
+    c.print(F("<label class=stack>")); c.print(label);
+    c.print(F("<input name=")); c.print(name);
+    c.print(F(" value='")); htmlEscape(c, value);
+    c.print(F("' placeholder='")); c.print(placeholder); c.print(F("'"));
+    if (readOnly) c.print(F(" disabled"));
+    c.print(F("></label>"));
+  };
+  textField(F("Haluttu client-versio"), "desired_client_version", g_settings.desiredVersion, F("v1.2.0"));
+  textField(F("Artifaktin nimi"),       "client_artifact_name",   g_settings.artifactName,   F("rootaika.exe"));
+  textField(F("SHA256"),                "client_sha256",          g_settings.sha256,         F("64 heksamerkki\xC3\xA4"));
   if (!readOnly) c.print(F("<div><button type=submit>Tallenna asetukset</button></div>"));
   c.print(F("</form>"));
 
