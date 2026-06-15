@@ -15,7 +15,7 @@
 #
 # The firmware UF2 is NOT touched, so this is independent of `make flash`; the
 # MP3 survives every later `make flash` (the sketch lives at the start of flash,
-# the FS partition at the end).
+# the FS partition lives near the end before the Arduino EEPROM reserve).
 #
 # REQUIREMENTS:
 #   - macOS/Linux with the rp2040 Arduino core installed (picotool + mklittlefs
@@ -30,10 +30,11 @@
 set -euo pipefail
 
 MP3="${1:-}"
-FS="${FS:-4194304}"               # LittleFS partition size, must match build FQBN
-FLASH_TOTAL="${FLASH:-8388608}"   # total addressed flash
-# The FS partition is the last FS bytes of flash (XIP base 0x10000000).
-FS_OFFSET=$(printf '0x%x' $((0x10000000 + FLASH_TOTAL - FS)))
+FS="${FS:-4194304}"                 # LittleFS partition size, must match build FQBN
+FLASH_TOTAL="${FLASH:-8388608}"     # total addressed flash
+EEPROM_BYTES="${EEPROM:-4096}"      # RP2040 Arduino core reserves this at flash end
+# The FS partition sits before the Arduino EEPROM reserve (XIP base 0x10000000).
+FS_OFFSET=$(printf '0x%x' $((0x10000000 + FLASH_TOTAL - EEPROM_BYTES - FS)))
 
 # Firmware's cap (storage.h maxWarningSoundBytesRP = 10 MB) and the filename it
 # serves from (handleWarningSound opens /warning.mp3).

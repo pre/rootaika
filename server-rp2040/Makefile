@@ -6,6 +6,7 @@
 #   make              build, then flash (default target)
 #   make upload       alias for flash
 #   make flash-sound MP3=path/to/sound.mp3
+#   make flash-sound path/to/sound.mp3
 #                     flash the warning MP3 into LittleFS over USB (BOOTSEL),
 #                     preserving existing data. Bypasses the slow WiFi upload.
 #                     The MP3 survives later `make flash` (separate flash region).
@@ -25,6 +26,9 @@ SKETCH    := RootaikaServer
 FLASH     := 8388608
 # LittleFS partition size in bytes (4 MB, see README).
 FS        := 4194304
+# The RP2040 Arduino core reserves the last 4 KB for EEPROM, so LittleFS starts
+# before that reserved page, not at the absolute end of flash.
+EEPROM    := 4096
 FQBN      := rp2040:rp2040:challenger_2040_wifi:flash=$(FLASH)_$(FS)
 BUILD_DIR := build
 
@@ -38,6 +42,18 @@ VERBOSE     ?=
 V_FLAG      := $(if $(VERBOSE),--verbose,)
 
 .PHONY: all build flash upload flash-sound clean help
+
+FLASH_SOUND_GOALS := $(filter-out flash-sound,$(MAKECMDGOALS))
+FLASH_SOUND_MP3   := $(if $(MP3),$(MP3),$(firstword $(FLASH_SOUND_GOALS)))
+FLASH_SOUND_PATH_GOALS := $(filter %.mp3 %.MP3,$(FLASH_SOUND_GOALS))
+
+ifneq ($(filter flash-sound,$(MAKECMDGOALS)),)
+ifneq ($(FLASH_SOUND_PATH_GOALS),)
+.PHONY: $(FLASH_SOUND_PATH_GOALS)
+$(FLASH_SOUND_PATH_GOALS):
+	@:
+endif
+endif
 
 all: build flash
 
@@ -72,10 +88,12 @@ upload: flash
 # Flash the warning MP3 into the LittleFS partition over USB, preserving existing
 # data. Requires the board in BOOTSEL mode (hold BOOTSEL while plugging USB).
 # Independent of the firmware flash: the sketch lives at the start of flash, the
-# FS partition at the end, so this MP3 survives every later `make flash`.
+# FS partition lives near the end before EEPROM, so this MP3 survives every later
+# `make flash`.
 flash-sound:
-	@test -n "$(MP3)" || { echo "usage: make flash-sound MP3=path/to/sound.mp3" >&2; exit 1; }
-	FS=$(FS) FLASH=$(FLASH) scripts/flash-sound.sh "$(MP3)"
+	@test -n "$(FLASH_SOUND_MP3)" || { echo "usage: make flash-sound MP3=path/to/sound.mp3" >&2; echo "   or: make flash-sound path/to/sound.mp3" >&2; exit 1; }
+	@test -n "$(MP3)" || test "$(words $(FLASH_SOUND_GOALS))" -le 1 || { echo "usage: pass exactly one MP3 path" >&2; exit 1; }
+	FS=$(FS) FLASH=$(FLASH) EEPROM=$(EEPROM) scripts/flash-sound.sh "$(FLASH_SOUND_MP3)"
 
 $(SKETCH)/wifi.h:
 	@echo "error: $(SKETCH)/wifi.h missing." >&2
