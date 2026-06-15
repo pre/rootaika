@@ -45,6 +45,7 @@ const char* AUTH_CLIENT = "Basic Y2xpZW50OmNsaWVudA==";
 const char* AUTH_ADMIN  = "Basic YWRtaW46YWRtaW4=";
 
 WiFiServer server(80);
+const uint16_t SERVER_CLIENT_TIMEOUT_SECONDS = 600;
 
 // ---- button debounce ----
 bool     buttonPressed   = false;
@@ -325,18 +326,20 @@ void handleWarningSound(WiFiClient& c) {
   }
   File f = LittleFS.open("/warning.mp3", "r");
   if (!f) { c.print(F("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")); c.flush(); c.stop(); return; }
+  long soundSize = (long)f.size();
   c.print(F("HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nETag: \""));
   c.print(g_settings.soundVer);
   c.print(F("\"\r\nContent-Disposition: attachment; filename=\""));
   jsonEscape(c, g_settings.soundName[0] ? g_settings.soundName : "warning.mp3");
   c.print(F("\"\r\nContent-Length: "));
-  c.print((long)f.size());
+  c.print(soundSize);
   c.print(F("\r\nConnection: close\r\n\r\n"));
-  uint8_t buf[512];
-  while (f.available()) {
-    int n = f.read(buf, sizeof(buf));
-    if (n <= 0) break;
-    c.write(buf, n);
+  size_t sent = c.write(f);
+  if (sent != (size_t)soundSize) {
+    Serial.print(F("[rootaika] warning sound partial send: "));
+    Serial.print(sent);
+    Serial.print(F("/"));
+    Serial.println(soundSize);
   }
   f.close();
   c.flush(); c.stop();
@@ -900,7 +903,7 @@ void setup() {
     for (int i = 0; i < 10 && !clockSync(); i++) delay(500);
     if (g_clockEpochBase) { char t[24]; nowUtcString(t, sizeof(t)); Serial.print(F("[rootaika] clock synced: ")); Serial.println(t); }
     else                    Serial.println(F("[rootaika] clock NOT synced (version timestamps blank until NTP responds)"));
-    server.begin(5, 3);
+    server.begin(5, SERVER_CLIENT_TIMEOUT_SECONDS);
     Serial.println(F("[rootaika] rootaika server on :80"));
   } else {
     Serial.println(F("[rootaika] WiFi FAILED - check SSID/password"));
