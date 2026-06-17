@@ -1,0 +1,11 @@
+[attr]tabbed        text  whitespace=trailing-space,space-before-tab,indent-with-non-tab
+[attr]whitespaced   text  whitespace=trailing-space,space-before-tab,tab-in-indent
+
+*.rb        whitespaced   diff=ruby
+*.md        whitespaced   diff=text
+*.sh        whitespaced   diff=text
+*.yml       whitespaced   diff=yaml
+*.yaml      whitespaced   diff=yaml
+Dockerfile* whitespaced
+
+*.go        tabbed        diff=golang
