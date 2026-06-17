@@ -22,11 +22,12 @@ import (
 )
 
 type stateStore struct {
-	mu            sync.RWMutex
-	path          string
-	current       config.Config
-	lastReported  string
-	configVersion string
+	mu                     sync.RWMutex
+	path                   string
+	current                config.Config
+	lastReported           string
+	configVersion          string
+	debugShutdownRequested bool
 	// failedUpdate records the last OTA version that failed to download/apply and
 	// when, so the poll loop can skip retrying a bad release for a cooldown window
 	// instead of spinning on every poll.
@@ -118,6 +119,20 @@ func startAgentHTTP(ctx context.Context, store *stateStore, eventBuffer *buffer.
 			store.setReported(string(req.Events[len(req.Events)-1].State))
 		}
 		writeJSON(w, http.StatusAccepted, map[string]int{"queued": queued})
+	})
+	mux.HandleFunc("/agent/debug-shutdown", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeAgent(store, w, r) {
+			return
+		}
+		if !store.requestDebugShutdown() {
+			http.Error(w, "debug shutdown requires locked debug mode", http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
 	})
 
 	listener, err := net.Listen("tcp", cfg.AgentListenAddress)
@@ -302,6 +317,13 @@ const serviceName = "rootaika-service"
 func watchdogLoop(ctx context.Context, store *stateStore, cfgPath string) {
 	runner := &agentrunner.Runner{ConfigPath: cfgPath}
 	for {
+		if store.agentPausedForDebugShutdown() {
+			log.Printf("agent paused after debug shutdown while locked")
+			if !sleep(ctx, 15*time.Second) {
+				return
+			}
+			continue
+		}
 		cfg := store.snapshot()
 		runner.Path = cfg.AgentPath
 		if err := runner.Ensure(ctx); err != nil {
@@ -366,10 +388,30 @@ func (s *stateStore) updateOnCooldown(ver string, now time.Time) bool {
 func (s *stateStore) update(fn func(*config.Config) bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !fn(&s.current) {
+	changed := fn(&s.current)
+	if !s.current.Locked || !s.current.DebugMode {
+		s.debugShutdownRequested = false
+	}
+	if !changed {
 		return nil
 	}
 	return config.Save(s.path, &s.current)
+}
+
+func (s *stateStore) requestDebugShutdown() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.current.DebugMode || !s.current.Locked {
+		return false
+	}
+	s.debugShutdownRequested = true
+	return true
+}
+
+func (s *stateStore) agentPausedForDebugShutdown() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.debugShutdownRequested && s.current.DebugMode && s.current.Locked
 }
 
 func authorizeAgent(store *stateStore, w http.ResponseWriter, r *http.Request) bool {

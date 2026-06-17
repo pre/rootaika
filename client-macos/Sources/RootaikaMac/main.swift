@@ -103,7 +103,7 @@ func runTestLock(seconds: Int) -> Int32 {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let controller = MacLockController()
-    controller.showLock(message: "Test lock", warningSeconds: 0)
+    controller.showLock(message: "Test lock", warningSeconds: 0, debugShutdownAllowed: false)
     let deadline = Date().addingTimeInterval(TimeInterval(max(0, seconds)))
     while Date() < deadline {
         RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
@@ -120,13 +120,19 @@ func runAgent(_ opts: CLIOptions) -> Int32 {
         FileHandle.standardError.write(Data("failed to load config: \(error)\n".utf8))
         return 1
     }
+    if DebugShutdownGate.shouldStayStopped(config: config) {
+        return 0
+    }
 
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory) // LSUIElement-style: no Dock icon / menu bar
 
     let board = NetworkBoardClient(config: config)
     let probe = MacActivityProbe()
-    let lock = MacLockController()
+    let lock = MacLockController {
+        DebugShutdownMarker.request()
+        NSApp.terminate(nil)
+    }
     let debug = MacDebugConsole()
     let core = Core(config: config, board: board, probe: probe, lock: lock, debug: debug)
 

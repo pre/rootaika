@@ -53,7 +53,7 @@ protocol DebugLogging {
 protocol LockControlling {
     /// Show (or refresh) the lock overlay with the given admin message.
     /// warningSeconds is informational; the countdown is owned by the caller.
-    func showLock(message: String, warningSeconds: Int)
+    func showLock(message: String, warningSeconds: Int, debugShutdownAllowed: Bool)
 
     /// Tear down the lock overlay.
     func hideLock()

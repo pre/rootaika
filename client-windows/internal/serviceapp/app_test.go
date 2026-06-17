@@ -95,6 +95,38 @@ func TestStateStoreUpdateSnapshot(t *testing.T) {
 	}
 }
 
+func TestDebugShutdownPauseLifecycle(t *testing.T) {
+	store := newStore(t, config.Config{Locked: true, DebugMode: true})
+	if !store.requestDebugShutdown() {
+		t.Fatalf("debug shutdown should be accepted while locked debug mode is active")
+	}
+	if !store.agentPausedForDebugShutdown() {
+		t.Fatalf("agent should be paused after accepted debug shutdown")
+	}
+	if err := store.update(func(c *config.Config) bool {
+		c.Locked = false
+		return true
+	}); err != nil {
+		t.Fatalf("unlock update: %v", err)
+	}
+	if store.agentPausedForDebugShutdown() {
+		t.Fatalf("agent pause should clear after unlock")
+	}
+	if store.requestDebugShutdown() {
+		t.Fatalf("debug shutdown should be rejected when unlocked")
+	}
+}
+
+func TestDebugShutdownPauseRequiresDebugMode(t *testing.T) {
+	store := newStore(t, config.Config{Locked: true, DebugMode: false})
+	if store.requestDebugShutdown() {
+		t.Fatalf("debug shutdown should be rejected when debug mode is disabled")
+	}
+	if store.agentPausedForDebugShutdown() {
+		t.Fatalf("agent should not be paused without an accepted request")
+	}
+}
+
 func TestAuthorizeAgent(t *testing.T) {
 	store := newStore(t, config.Config{AgentToken: "secret-token"})
 
@@ -202,6 +234,36 @@ func TestStartAgentHTTPEndpoints(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400 for empty events, got %d", rec.Code)
+		}
+	})
+
+	t.Run("debug shutdown rejected unless locked", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/agent/debug-shutdown", nil)
+		req.Header.Set("X-Rootaika-Agent-Token", "tok")
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("expected 409 while unlocked, got %d", rec.Code)
+		}
+	})
+
+	t.Run("debug shutdown accepted when locked debug", func(t *testing.T) {
+		if err := store.update(func(c *config.Config) bool {
+			c.Locked = true
+			c.DebugMode = true
+			return true
+		}); err != nil {
+			t.Fatalf("lock debug update: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/agent/debug-shutdown", nil)
+		req.Header.Set("X-Rootaika-Agent-Token", "tok")
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("expected 202, got %d", rec.Code)
+		}
+		if !store.agentPausedForDebugShutdown() {
+			t.Fatalf("debug shutdown did not pause agent restart")
 		}
 	})
 }

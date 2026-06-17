@@ -12,7 +12,11 @@ func NewController() *Controller {
 	return &Controller{}
 }
 
-func (c *Controller) SetLocked(context.Context, bool, string) error {
+func (c *Controller) DebugShutdown() <-chan struct{} {
+	return nil
+}
+
+func (c *Controller) SetLocked(context.Context, bool, string, bool) error {
 	return nil
 }
 

@@ -47,21 +47,30 @@ final class MacLockController: LockControlling {
     private var cursorHidden = false
 
     private var currentMessage: String = ""
+    private var currentDebugShutdownAllowed = false
 
     // Looping warning sound, playing only during the pre-lock countdown (best-effort).
     private var audioPlayer: AVAudioPlayer?
+    private let onDebugShutdown: () -> Void
 
-    init() {}
+    init(onDebugShutdown: @escaping () -> Void = {}) {
+        self.onDebugShutdown = onDebugShutdown
+    }
 
     // MARK: - LockControlling
 
-    func showLock(message: String, warningSeconds: Int) {
+    func showLock(message: String, warningSeconds: Int, debugShutdownAllowed: Bool) {
         runOnMain {
             // Idempotent refresh: if already shown, just update the message.
             if !self.lockWindows.isEmpty {
                 if message != self.currentMessage {
                     self.currentMessage = message
                     self.updateLockMessage(message)
+                }
+                if debugShutdownAllowed != self.currentDebugShutdownAllowed {
+                    self.currentDebugShutdownAllowed = debugShutdownAllowed
+                    self.updateDebugShutdownAllowed(debugShutdownAllowed)
+                    self.applyCursorPolicy(debugShutdownAllowed: debugShutdownAllowed)
                 }
                 return
             }
@@ -70,11 +79,12 @@ final class MacLockController: LockControlling {
             self.tearDownWarningWindows()
 
             self.currentMessage = message
+            self.currentDebugShutdownAllowed = debugShutdownAllowed
             self.engageKioskMode()
-            self.buildLockWindows(message: message)
+            self.buildLockWindows(message: message, debugShutdownAllowed: debugShutdownAllowed)
             self.startKeepOnTopTimer()
             self.installKeyMonitor()
-            self.hideCursorIfNeeded()
+            self.applyCursorPolicy(debugShutdownAllowed: debugShutdownAllowed)
             // No audio at the lock moment: the warning sound, if any, played
             // during the countdown and is stopped before the lock engages.
 
@@ -92,6 +102,7 @@ final class MacLockController: LockControlling {
             self.restoreCursorIfNeeded()
             self.restoreKioskMode()
             self.currentMessage = ""
+            self.currentDebugShutdownAllowed = false
             self.setShowing(false)
         }
     }
@@ -152,7 +163,7 @@ final class MacLockController: LockControlling {
 
     // MARK: - Lock windows
 
-    private func buildLockWindows(message: String) {
+    private func buildLockWindows(message: String, debugShutdownAllowed: Bool) {
         let level = Int(CGShieldingWindowLevel())
         for screen in NSScreen.screens {
             let window = NSWindow(
@@ -177,7 +188,11 @@ final class MacLockController: LockControlling {
             window.acceptsMouseMovedEvents = true
             window.setFrame(screen.frame, display: true)
 
-            let content = LockContentView(frame: screen.frame)
+            let content = LockContentView(
+                frame: screen.frame,
+                debugShutdownAllowed: debugShutdownAllowed,
+                onDebugShutdown: onDebugShutdown
+            )
             content.message = message
             window.contentView = content
             window.initialFirstResponder = content
@@ -194,6 +209,12 @@ final class MacLockController: LockControlling {
     private func updateLockMessage(_ message: String) {
         for window in lockWindows {
             (window.contentView as? LockContentView)?.message = message
+        }
+    }
+
+    private func updateDebugShutdownAllowed(_ allowed: Bool) {
+        for window in lockWindows {
+            (window.contentView as? LockContentView)?.debugShutdownAllowed = allowed
         }
     }
 
@@ -380,6 +401,14 @@ final class MacLockController: LockControlling {
         }
     }
 
+    private func applyCursorPolicy(debugShutdownAllowed: Bool) {
+        if debugShutdownAllowed {
+            restoreCursorIfNeeded()
+        } else {
+            hideCursorIfNeeded()
+        }
+    }
+
     // MARK: - Helpers
 
     private func setShowing(_ value: Bool) {
@@ -406,12 +435,20 @@ final class MacLockController: LockControlling {
 /// swallows mouse / key events so the user can't interact past the overlay.
 private final class LockContentView: NSView {
     private let label = NSTextField(labelWithString: "rootaika")
+    private let debugButton = NSButton(title: "Sammuta client", target: nil, action: nil)
+    private let onDebugShutdown: () -> Void
 
     var message: String = "" {
         didSet { updateText() }
     }
 
-    override init(frame frameRect: NSRect) {
+    var debugShutdownAllowed: Bool {
+        didSet { debugButton.isHidden = !debugShutdownAllowed }
+    }
+
+    init(frame frameRect: NSRect, debugShutdownAllowed: Bool, onDebugShutdown: @escaping () -> Void) {
+        self.debugShutdownAllowed = debugShutdownAllowed
+        self.onDebugShutdown = onDebugShutdown
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = MacLockController.lockBackgroundColor.cgColor
@@ -427,11 +464,25 @@ private final class LockContentView: NSView {
         label.lineBreakMode = .byWordWrapping
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
+
+        debugButton.target = self
+        debugButton.action = #selector(debugShutdownClicked)
+        debugButton.bezelStyle = .rounded
+        debugButton.controlSize = .large
+        debugButton.font = .boldSystemFont(ofSize: 16)
+        debugButton.isHidden = !debugShutdownAllowed
+        debugButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(debugButton)
+
         NSLayoutConstraint.activate([
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 40),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -40)
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -40),
+            debugButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -36),
+            debugButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -32),
+            debugButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+            debugButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 40)
         ])
         updateText()
     }
@@ -445,6 +496,10 @@ private final class LockContentView: NSView {
         } else {
             label.stringValue = "rootaika\n\n\(message)"
         }
+    }
+
+    @objc private func debugShutdownClicked() {
+        onDebugShutdown()
     }
 
     // Make this view (and thus its window) capture key input.

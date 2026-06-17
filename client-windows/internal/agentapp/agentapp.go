@@ -33,6 +33,7 @@ func Run(ctx context.Context, cfgPath string) error {
 	probe := activity.NewProbe()
 	locker := lock.NewController()
 	defer locker.Close()
+	debugShutdown := locker.DebugShutdown()
 	console := consolewin.New()
 	defer console.Close()
 
@@ -83,7 +84,7 @@ func Run(ctx context.Context, cfgPath string) error {
 		if state.Locked {
 			switch {
 			case warned || state.LockWarningSeconds <= 0:
-				if err := locker.SetLocked(ctx, true, state.LockMessage); err != nil {
+				if err := locker.SetLocked(ctx, true, state.LockMessage, state.DebugMode); err != nil {
 					log.Printf("set locked state failed: %v", err)
 				}
 				screenLocked = true
@@ -92,7 +93,7 @@ func Run(ctx context.Context, cfgPath string) error {
 				case <-warnDone:
 					warning = false
 					warned = true
-					if err := locker.SetLocked(ctx, true, state.LockMessage); err != nil {
+					if err := locker.SetLocked(ctx, true, state.LockMessage, state.DebugMode); err != nil {
 						log.Printf("set locked state failed: %v", err)
 					}
 					screenLocked = true
@@ -118,9 +119,13 @@ func Run(ctx context.Context, cfgPath string) error {
 			}
 			warning = false
 			warned = false
-			if err := locker.SetLocked(ctx, false, ""); err != nil {
+			if err := locker.SetLocked(ctx, false, "", false); err != nil {
 				log.Printf("set locked state failed: %v", err)
 			}
+		}
+
+		if consumeDebugShutdown(ctx, local, state, debugShutdown) {
+			return nil
 		}
 
 		snapshot, err := probe.Snapshot(ctx)
@@ -145,10 +150,47 @@ func Run(ctx context.Context, cfgPath string) error {
 		if interval <= 0 {
 			interval = 5 * time.Second
 		}
-		if !sleep(ctx, interval) {
+		if !sleepOrDebugShutdown(ctx, interval, local, state, debugShutdown) {
 			return nil
 		}
 	}
+}
+
+func consumeDebugShutdown(ctx context.Context, local localClient, state serviceState, signal <-chan struct{}) bool {
+	if signal == nil {
+		return false
+	}
+	select {
+	case <-signal:
+		return requestDebugShutdown(ctx, local, state)
+	default:
+		return false
+	}
+}
+
+func sleepOrDebugShutdown(ctx context.Context, duration time.Duration, local localClient, state serviceState, signal <-chan struct{}) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	case <-signal:
+		return !requestDebugShutdown(ctx, local, state)
+	}
+}
+
+func requestDebugShutdown(ctx context.Context, local localClient, state serviceState) bool {
+	if !state.DebugMode || !state.Locked {
+		return false
+	}
+	if err := local.requestDebugShutdown(ctx); err != nil {
+		log.Printf("debug shutdown request failed: %v", err)
+		return false
+	}
+	log.Printf("debug shutdown accepted by service, exiting agent")
+	return true
 }
 
 // shouldEmit decides whether the freshly observed event must be sent. An event
@@ -205,17 +247,6 @@ func normalizeProcessName(name string) string {
 	return strings.ToLower(path.Base(name))
 }
 
-func sleep(ctx context.Context, duration time.Duration) bool {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
-}
-
 type localClient struct {
 	httpClient *http.Client
 	address    string
@@ -261,6 +292,23 @@ func (c localClient) postEvent(ctx context.Context, event model.Event) error {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("POST /agent/events failed with %s", resp.Status)
+	}
+	return nil
+}
+
+func (c localClient) requestDebugShutdown(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint("/agent/debug-shutdown"), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Rootaika-Agent-Token", c.token)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("POST /agent/debug-shutdown failed with %s", resp.Status)
 	}
 	return nil
 }

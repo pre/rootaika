@@ -280,7 +280,7 @@ actor Core {
         // (re)drive the overlay, otherwise the sound restarts and the overlay
         // flickers every poll. The warned flag is part of the signature so that
         // a warning -> lock transition we drove ourselves is not seen as "new".
-        let signature = "\(locked)|\(warningSeconds)|\(warned)|\(message)"
+        let signature = "\(locked)|\(warningSeconds)|\(warned)|\(config.debugMode)|\(message)"
         if signature == lastLockSignature {
             return
         }
@@ -299,7 +299,11 @@ actor Core {
         // Locked.
         if warningSeconds <= 0 || warned {
             lock.hideWarning()
-            lock.showLock(message: message, warningSeconds: warningSeconds)
+            lock.showLock(
+                message: message,
+                warningSeconds: warningSeconds,
+                debugShutdownAllowed: config.debugMode
+            )
             return
         }
 
@@ -342,7 +346,11 @@ actor Core {
         warned = true
         warningTask = nil
         lock.hideWarning() // stops the warning sound and banner
-        lock.showLock(message: message, warningSeconds: warningSeconds)
+        lock.showLock(
+            message: message,
+            warningSeconds: warningSeconds,
+            debugShutdownAllowed: config.debugMode
+        )
     }
 
     // MARK: Test helpers

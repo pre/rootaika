@@ -239,9 +239,9 @@
             <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>
-            <td>Agentin näkyvyys</td>
-            <td>Agentti ei näy taskbarissa eikä alt-tabissa.</td>
-            <td>Konsoli-ikkuna piilotetaan oletuksena. Palvelinpäästä asetettava <code>debug_mode</code> tuo konsolin näkyviin devausta varten. Todennettu Windowsilla.</td>
+            <td>Agentin näkyvyys ja debug-sammutus</td>
+            <td>Agentti ei näy taskbarissa eikä alt-tabissa. Suunnitelmassa ei ollut kehityskoneella tarvittavaa lukitusruudun sammutusreittiä.</td>
+            <td>Konsoli-ikkuna piilotetaan oletuksena. Palvelinpäästä asetettava <code>debug_mode</code> tuo konsolin näkyviin devausta varten. Lisäksi Windows- ja macOS-clientin vihreä lukitusruutu näyttää debug-tilassa <code>Sammuta client</code> -napin: Windows-agentti pyytää serviceltä debug-pysäytyksen, jolloin watchdog ei käynnistä agenttia uudelleen ennen unlockia; macOS kirjoittaa väliaikaisen debug-stop-markerin, jotta LaunchAgent ei palauta lukitusta ennen unlockia.</td>
             <td><span class="status status-done">valmis</span></td>
           </tr>
           <tr>

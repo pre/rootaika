@@ -4,6 +4,7 @@ package lock
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
@@ -41,6 +42,9 @@ $form.FormBorderStyle = 'None'
 $form.BackColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
 $form.TopMost = $true
 $form.ShowInTaskbar = $false
+$debugShutdownAllowed = $env:ROOTAIKA_LOCK_DEBUG_SHUTDOWN -eq '1'
+$script:allowClose = $false
+$script:debugShutdown = $false
 $label = New-Object System.Windows.Forms.Label
 $label.AutoSize = $false
 $label.Dock = 'Fill'
@@ -51,6 +55,28 @@ $nl = [Environment]::NewLine
 $message = $env:ROOTAIKA_LOCK_MESSAGE
 $label.Text = "rootaika" + $nl + $nl + $message
 $form.Controls.Add($label)
+if ($debugShutdownAllowed) {
+    $button = New-Object System.Windows.Forms.Button
+    $button.Text = 'Sammuta client'
+    $button.Width = 170
+    $button.Height = 44
+    $button.Anchor = [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Bottom
+    $button.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
+    $button.Left = $form.ClientSize.Width - $button.Width - 32
+    $button.Top = $form.ClientSize.Height - $button.Height - 28
+    $button.Add_Click({
+        $script:debugShutdown = $true
+        $script:allowClose = $true
+        $timer.Stop()
+        $form.Close()
+    })
+    $form.Add_Resize({
+        $button.Left = $form.ClientSize.Width - $button.Width - 32
+        $button.Top = $form.ClientSize.Height - $button.Height - 28
+    })
+    $form.Controls.Add($button)
+    $button.BringToFront()
+}
 # GWL_EXSTYLE = -20, WS_EX_TOOLWINDOW = 0x80. A tool window is omitted from the
 # Alt+Tab list, so the user cannot switch to and close the overlay that way.
 $form.Add_HandleCreated({
@@ -58,32 +84,41 @@ $form.Add_HandleCreated({
     [void][RootaikaNative]::SetWindowLong($form.Handle, -20, $exStyle -bor 0x80)
 })
 # Block every user-initiated close (Alt+F4, window menu). Process.Kill still ends it.
-$form.Add_FormClosing({ param($sender, $e) $e.Cancel = $true })
+$form.Add_FormClosing({ param($sender, $e) if (-not $script:allowClose) { $e.Cancel = $true } })
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 500
 $timer.Add_Tick({ $form.TopMost = $true; $form.Activate() })
 $timer.Start()
-[System.Windows.Forms.Cursor]::Hide()
+if (-not $debugShutdownAllowed) { [System.Windows.Forms.Cursor]::Hide() }
 [System.Windows.Forms.Application]::Run($form)
-[System.Windows.Forms.Cursor]::Show()
+if (-not $debugShutdownAllowed) { [System.Windows.Forms.Cursor]::Show() }
+if ($script:debugShutdown) { exit 42 }
 `
 
+const debugShutdownExitCode = 42
+
 type Controller struct {
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	locked  bool
-	message string
+	mu                   sync.Mutex
+	cmd                  *exec.Cmd
+	locked               bool
+	message              string
+	debugShutdownAllowed bool
 	// exited reports that the overlay process for the current lock died on its
 	// own (the user killed it, it crashed). SetLocked relaunches when this is set
 	// and the device is still locked, so a dismissed overlay reappears.
-	exited bool
+	exited        bool
+	debugShutdown chan struct{}
 }
 
 func NewController() *Controller {
-	return &Controller{}
+	return &Controller{debugShutdown: make(chan struct{}, 1)}
 }
 
-func (c *Controller) SetLocked(ctx context.Context, locked bool, message string) error {
+func (c *Controller) DebugShutdown() <-chan struct{} {
+	return c.debugShutdown
+}
+
+func (c *Controller) SetLocked(ctx context.Context, locked bool, message string, debugShutdownAllowed bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -91,7 +126,7 @@ func (c *Controller) SetLocked(ctx context.Context, locked bool, message string)
 		// The overlay is up to date only when it is still running (not exited) and
 		// shows the current message. Otherwise re-render: a changed message or a
 		// dead overlay both fall through to a fresh launch.
-		if c.locked && c.cmd != nil && !c.exited && c.message == message {
+		if c.locked && c.cmd != nil && !c.exited && c.message == message && c.debugShutdownAllowed == debugShutdownAllowed {
 			return nil
 		}
 		if c.cmd != nil && c.cmd.Process != nil {
@@ -105,20 +140,28 @@ func (c *Controller) SetLocked(ctx context.Context, locked bool, message string)
 			"-Command", overlayScript,
 		)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		cmd.Env = append(os.Environ(), "ROOTAIKA_LOCK_MESSAGE="+message)
+		cmd.Env = append(os.Environ(),
+			"ROOTAIKA_LOCK_MESSAGE="+message,
+			"ROOTAIKA_LOCK_DEBUG_SHUTDOWN="+boolEnv(debugShutdownAllowed),
+		)
 		if err := cmd.Start(); err != nil {
 			return err
 		}
 		c.cmd = cmd
 		c.locked = true
 		c.message = message
+		c.debugShutdownAllowed = debugShutdownAllowed
 		c.exited = false
 		go func() {
-			_ = cmd.Wait()
+			err := cmd.Wait()
+			debugShutdown := commandExitCode(err) == debugShutdownExitCode
 			c.mu.Lock()
 			// Only flag exit if this is still the active overlay; an unlock or a
 			// relaunch swaps c.cmd and must not be marked as a spurious exit.
 			if c.cmd == cmd {
+				if debugShutdown {
+					c.signalDebugShutdown()
+				}
 				c.exited = true
 			}
 			c.mu.Unlock()
@@ -132,8 +175,34 @@ func (c *Controller) SetLocked(ctx context.Context, locked bool, message string)
 	c.cmd = nil
 	c.locked = false
 	c.message = ""
+	c.debugShutdownAllowed = false
 	c.exited = false
 	return nil
+}
+
+func (c *Controller) signalDebugShutdown() {
+	select {
+	case c.debugShutdown <- struct{}{}:
+	default:
+	}
+}
+
+func boolEnv(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
+}
+
+func commandExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
 }
 
 // warnOverlayScript renders a click-through, non-activating countdown overlay
@@ -303,5 +372,5 @@ func (c *Controller) playLoop(ctx context.Context, soundPath string) func() {
 }
 
 func (c *Controller) Close() error {
-	return c.SetLocked(context.Background(), false, "")
+	return c.SetLocked(context.Background(), false, "", false)
 }
