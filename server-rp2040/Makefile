@@ -10,6 +10,8 @@
 #                     flash the warning MP3 into LittleFS over USB (BOOTSEL),
 #                     preserving existing data. Bypasses the slow WiFi upload.
 #                     The MP3 survives later `make flash` (separate flash region).
+#   make sim-build    build the macOS/Linux host simulator
+#   make sim-run      run the host simulator on http://127.0.0.1:8080/
 #
 # The board is the iLabs Challenger RP2040 WiFi with a LittleFS partition.
 # See README.md for the toolchain (arduino-cli + rp2040 core + libraries) and
@@ -20,6 +22,8 @@
 #   make flash PORT=/dev/ttyACM0     pin the serial port (else autodetected)
 #   make FS=2097152                  pick a different LittleFS size in bytes
 #   make build VERBOSE=1             pass --verbose to arduino-cli
+#   make sim-run ROOTAIKA_SIM_PORT=8081
+#   make sim-run ROOTAIKA_SIM_FS=/tmp/rootaika-rp2040-sim
 
 SKETCH    := RootaikaServer
 # Total flash addressed by the layout (8 MB, see README).
@@ -31,6 +35,10 @@ FS        := 4194304
 EEPROM    := 4096
 FQBN      := rp2040:rp2040:challenger_2040_wifi:flash=$(FLASH)_$(FS)
 BUILD_DIR := build
+SIM_BIN   := $(BUILD_DIR)/sim-rootaika-server
+SIM_ARDUINOJSON ?= $(HOME)/Documents/Arduino/libraries/ArduinoJson/src
+ROOTAIKA_SIM_PORT ?= 8080
+ROOTAIKA_SIM_FS   ?= simdata
 
 # Resolve arduino-cli from PATH, else the common Homebrew prefixes — a
 # non-login shell (e.g. ssh "make build") often lacks /opt/homebrew/bin on PATH.
@@ -41,7 +49,7 @@ PORT        ?=
 VERBOSE     ?=
 V_FLAG      := $(if $(VERBOSE),--verbose,)
 
-.PHONY: all build flash upload flash-sound clean help
+.PHONY: all build flash upload flash-sound sim-build sim-run clean help
 
 FLASH_SOUND_GOALS := $(filter-out flash-sound,$(MAKECMDGOALS))
 FLASH_SOUND_MP3   := $(if $(MP3),$(MP3),$(firstword $(FLASH_SOUND_GOALS)))
@@ -84,6 +92,21 @@ flash: $(SKETCH)/wifi.h
 		"$(SKETCH)"
 
 upload: flash
+
+sim-build:
+	@test -f "$(SIM_ARDUINOJSON)/ArduinoJson.h" || { \
+		echo "error: ArduinoJson headers not found at $(SIM_ARDUINOJSON)" >&2; \
+		echo "       set SIM_ARDUINOJSON=/path/to/ArduinoJson/src" >&2; exit 1; }
+	mkdir -p "$(BUILD_DIR)"
+	$(CXX) -std=c++17 -Wall -Wextra -Wno-unused-parameter \
+		-I"sim" -I"$(SKETCH)" -I"$(SIM_ARDUINOJSON)" \
+		-o "$(SIM_BIN)" \
+		"sim/main.cpp"
+
+sim-run: sim-build
+	ROOTAIKA_SIM_PORT="$(ROOTAIKA_SIM_PORT)" \
+	ROOTAIKA_SIM_FS="$(ROOTAIKA_SIM_FS)" \
+	"$(SIM_BIN)"
 
 # Flash the warning MP3 into the LittleFS partition over USB, preserving existing
 # data. Requires the board in BOOTSEL mode (hold BOOTSEL while plugging USB).

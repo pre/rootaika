@@ -639,9 +639,9 @@ static bool setDeviceLock(int id, bool locked, const char* msg, int warnSeconds)
 // countdown. Mirrors Go's ToggleAllLocks and backs the POST /api/v1/lock toggle.
 // Returns the resulting state and affected count.
 static bool toggleAllLocks(const char* msg, int warnSeconds, int* affectedOut) {
-  int lockedCount = 0, total = 0;
+  int lockedCount = 0;
   for (int i = 0; i < g_deviceCount; i++)
-    if (isAssigned(g_devices[i])) { total++; if (g_devices[i].locked) lockedCount++; }
+    if (isAssigned(g_devices[i]) && g_devices[i].locked) lockedCount++;
   bool lock = (lockedCount == 0);
   int affected = 0;
   for (int i = 0; i < g_deviceCount; i++) {

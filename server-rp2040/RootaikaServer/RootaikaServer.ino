@@ -14,7 +14,7 @@
     POST /api/v1/lock                client/admin  toggle all assigned devices (board button)
     POST /api/v1/unlock              client/admin  release all assigned devices
     GET  /settings                   client/admin  admin Settings page (read-only for client)
-    POST /admin/*                    admin only    settings page mutations (urlencoded + MP3 multipart)
+    POST /admin/...                  admin only    settings page mutations (urlencoded + MP3 multipart)
     GET  /                           client/admin  live dashboard (today minutes, lock state)
 
   Lock is driven by the PHYSICAL BUTTON (GPIO2): short press = lock all assigned,

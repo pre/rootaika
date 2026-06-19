@@ -130,3 +130,46 @@ arduino-cli upload  --fqbn "$FQBN" -p /dev/cu.usbmodemXXXX RootaikaServer
 
 The server advertises mDNS as `rootaika.local`, so clients can target
 `http://rootaika.local`.
+
+## Host simulator for client development
+
+The same firmware routing and endpoint handlers can be run on macOS/Linux
+without the board:
+
+```sh
+cd server-rp2040
+make sim-run
+```
+
+The simulator maps the firmware's port 80 server to `http://0.0.0.0:8080/`,
+so it accepts connections from the Mac host and from VMs that can reach the Mac
+network interface. Override the port or the LittleFS backing directory when
+needed:
+
+```sh
+ROOTAIKA_SIM_PORT=8081 ROOTAIKA_SIM_FS=/tmp/rootaika-rp2040 make sim-run
+```
+
+This is not a separate mock server. `sim/main.cpp` includes
+`RootaikaServer/RootaikaServer.ino`, so the API routing, JSON responses,
+settings page rendering, event ingestion, config generation, lock behavior, and
+LittleFS-backed persistence use the same source files as the real RP2040 build.
+Only the hardware boundary is adapted: `WiFiServer` listens on localhost,
+`LittleFS` stores files in a host directory, GPIO reads idle high, and the
+NeoPixel is a no-op.
+
+Example checks:
+
+```sh
+curl -u client:client \
+  'http://127.0.0.1:8080/api/v1/client/config?client_id=mac-sim'
+
+curl -u client:client -H 'Content-Type: application/json' \
+  -d '{"client_id":"mac-sim","events":[{"event_id":"ev-1","type":"activity_observed","occurred_at":"2026-06-19T09:00:00Z","state":"active","process_name":"Game.exe","sequence":1}]}' \
+  'http://127.0.0.1:8080/api/v1/events/batch'
+```
+
+From a Windows client running in VirtualBox, point the client at the Mac host's
+reachable IP address instead of `127.0.0.1`, for example
+`http://192.168.68.10:8080/` on bridged networking. With NAT networking,
+VirtualBox commonly exposes the host as `http://10.0.2.2:8080/`.
