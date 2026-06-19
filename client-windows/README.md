@@ -149,6 +149,8 @@ client-windows/scripts/vbox-macos-launch.sh
 
 The macOS script cross-compiles `client-windows/dist/rootaika.exe`, writes a launch request under `client-windows/.vbox-launch/`, and exits. The Windows watcher sees the request, verifies the SHA256, stops old `rootaika` processes, copies the exe to `%TEMP%\rootaika-vbox`, and starts `rootaika.exe service`; the service starts the agent from the same exe.
 
+By default the macOS script sends `http://<current Mac default-network IP>:8080` as the server URL. This avoids the stale hard-coded LAN IP problem when the Mac gets a new address.
+
 Useful overrides:
 
 ```sh
@@ -156,6 +158,12 @@ ROOTAIKA_SERVER_URL=http://192.168.68.199:8080 \
 ROOTAIKA_CLIENT_USERNAME=client \
 ROOTAIKA_CLIENT_PASSWORD=client \
 client-windows/scripts/vbox-macos-launch.sh --version dev
+```
+
+If only the port differs:
+
+```sh
+client-windows/scripts/vbox-macos-launch.sh --server-port 8081
 ```
 
 ### Network outages and server restarts

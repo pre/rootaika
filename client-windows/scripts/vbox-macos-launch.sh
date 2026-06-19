@@ -9,14 +9,31 @@ Usage: scripts/vbox-macos-launch.sh [options]
 
 Options:
   --server-url URL          Server URL for the Windows client.
+  --server-port PORT        Port used when auto-detecting the Mac host URL.
   --client-username USER    Client Basic Auth username.
   --client-password PASS    Client Basic Auth password.
   --version VERSION         Version string baked into rootaika.exe.
   -h, --help                Show this help.
 
-Defaults can also come from ROOTAIKA_SERVER_URL, ROOTAIKA_CLIENT_USERNAME,
-ROOTAIKA_CLIENT_PASSWORD, and ROOTAIKA_VERSION.
+Defaults can also come from ROOTAIKA_SERVER_URL, ROOTAIKA_SERVER_PORT,
+ROOTAIKA_CLIENT_USERNAME, ROOTAIKA_CLIENT_PASSWORD, and ROOTAIKA_VERSION.
 EOF
+}
+
+detect_host_ip() {
+  local iface=""
+  local ip=""
+
+  if command -v route >/dev/null 2>&1; then
+    iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
+  fi
+  if [[ -n "$iface" ]] && command -v ipconfig >/dev/null 2>&1; then
+    ip="$(ipconfig getifaddr "$iface" 2>/dev/null || true)"
+  fi
+  if [[ -z "$ip" ]] && command -v ifconfig >/dev/null 2>&1; then
+    ip="$(ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" && $2 !~ /^169[.]254[.]/{print $2; exit}')"
+  fi
+  printf '%s' "$ip"
 }
 
 json_escape() {
@@ -34,7 +51,8 @@ CLIENT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REQUEST_DIR="$CLIENT_ROOT/.vbox-launch"
 REQUEST_PATH="$REQUEST_DIR/request.json"
 
-SERVER_URL="${ROOTAIKA_SERVER_URL:-http://192.168.68.199:8080}"
+SERVER_URL="${ROOTAIKA_SERVER_URL:-}"
+SERVER_PORT="${ROOTAIKA_SERVER_PORT:-8080}"
 CLIENT_USERNAME="${ROOTAIKA_CLIENT_USERNAME:-client}"
 CLIENT_PASSWORD="${ROOTAIKA_CLIENT_PASSWORD:-client}"
 VERSION="${ROOTAIKA_VERSION:-dev}"
@@ -43,6 +61,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --server-url)
       SERVER_URL="${2:?missing value for --server-url}"
+      shift 2
+      ;;
+    --server-port)
+      SERVER_PORT="${2:?missing value for --server-port}"
       shift 2
       ;;
     --client-username)
@@ -68,6 +90,15 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "$SERVER_URL" ]]; then
+  HOST_IP="$(detect_host_ip)"
+  if [[ -z "$HOST_IP" ]]; then
+    echo "could not auto-detect the Mac host IP, pass --server-url http://IP:PORT" >&2
+    exit 2
+  fi
+  SERVER_URL="http://$HOST_IP:$SERVER_PORT"
+fi
 
 REQUEST_ID="$(date -u '+%Y%m%dT%H%M%SZ')-$$"
 CREATED_AT_UTC="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -97,6 +128,9 @@ Wrote VirtualBox launch request:
 
 The Windows watcher should restart rootaika from:
   $CLIENT_ROOT/dist/rootaika.exe
+
+Server URL sent to Windows:
+  $SERVER_URL
 
 If the watcher is not running in Windows yet, start it once from the shared repo:
   powershell -ExecutionPolicy Bypass -File .\\client-windows\\scripts\\vbox-windows-watch.ps1
