@@ -77,19 +77,11 @@ function Get-LastRequestId {
 }
 
 function Stop-RootaikaProcesses {
-    $processes = Get-Process rootaika -ErrorAction SilentlyContinue
-    if (-not $processes) {
-        return
+    $stopScript = Join-Path $ScriptDir "vbox-windows-stop.ps1"
+    if (-not (Test-Path $stopScript)) {
+        throw "stop helper not found at $stopScript"
     }
-    Write-Host "Stopping old rootaika processes..." -ForegroundColor Yellow
-    $processes | Stop-Process -Force
-    $deadline = (Get-Date).AddSeconds(5)
-    while (Get-Process rootaika -ErrorAction SilentlyContinue) {
-        if ((Get-Date) -gt $deadline) {
-            throw "old rootaika processes did not exit"
-        }
-        Start-Sleep -Milliseconds 200
-    }
+    & $stopScript -Quiet
 }
 
 function Copy-ExeWithRetry {

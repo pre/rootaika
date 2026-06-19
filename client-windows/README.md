@@ -149,6 +149,12 @@ client-windows/scripts/vbox-macos-launch.sh
 
 The macOS script cross-compiles `client-windows/dist/rootaika.exe`, writes a launch request under `client-windows/.vbox-launch/`, and exits. The Windows watcher sees the request, verifies the SHA256, stops old `rootaika` processes, copies the exe to `%TEMP%\rootaika-vbox`, and starts `rootaika.exe service`; the service starts the agent from the same exe.
 
+To stop the VirtualBox test client manually from Windows Explorer, double-click:
+
+```text
+client-windows\scripts\vbox-windows-stop.cmd
+```
+
 By default the macOS script sends `http://<current Mac default-network IP>:8080` as the server URL. This avoids the stale hard-coded LAN IP problem when the Mac gets a new address.
 
 Useful overrides:

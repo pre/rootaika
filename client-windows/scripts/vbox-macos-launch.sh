@@ -137,4 +137,7 @@ If the watcher is not running in Windows yet, start it once from the shared repo
 
 For autostart inside the VM:
   powershell -ExecutionPolicy Bypass -File .\\client-windows\\scripts\\vbox-windows-watch.ps1 -InstallAutostart
+
+To stop the Windows test client manually from Windows Explorer:
+  double-click client-windows\\scripts\\vbox-windows-stop.cmd
 EOF
