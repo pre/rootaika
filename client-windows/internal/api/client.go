@@ -16,9 +16,13 @@ import (
 )
 
 const (
-	defaultMaxAttempts = 4
-	defaultBaseBackoff = 500 * time.Millisecond
-	defaultMaxBackoff  = 5 * time.Second
+	defaultMaxAttempts      = 4
+	defaultBaseBackoff      = 500 * time.Millisecond
+	defaultMaxBackoff       = 5 * time.Second
+	maxJSONResponseBytes    = 1 << 20
+	maxWarningSoundBytes    = 10 << 20
+	acceptJSON              = "application/json"
+	acceptWarningSoundAudio = "audio/mpeg"
 )
 
 type Client struct {
@@ -85,7 +89,7 @@ func (c *Client) PostEvents(ctx context.Context, batch model.EventBatch) error {
 // the shared retry/auth path, so a transient failure is retried like any other
 // request. The returned bytes are the raw MP3 the caller caches locally.
 func (c *Client) DownloadWarningSound(ctx context.Context) ([]byte, error) {
-	return c.doJSON(ctx, http.MethodGet, "/api/v1/warning-sound", nil, nil)
+	return c.do(ctx, http.MethodGet, "/api/v1/warning-sound", nil, nil, acceptWarningSoundAudio, maxWarningSoundBytes)
 }
 
 // FetchConfig polls the server for this client's config. When waitSeconds > 0
@@ -124,6 +128,10 @@ func (c *Client) FetchConfig(ctx context.Context, clientID, status, knownConfigV
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, payload any) ([]byte, error) {
+	return c.do(ctx, method, path, query, payload, acceptJSON, maxJSONResponseBytes)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, query url.Values, payload any, accept string, responseLimit int64) ([]byte, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("server URL is empty")
 	}
@@ -157,7 +165,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 			}
 		}
 
-		body, retryable, err := c.attempt(ctx, method, path, endpoint.String(), payloadBytes, payload != nil)
+		body, retryable, err := c.attempt(ctx, method, path, endpoint.String(), payloadBytes, payload != nil, accept, responseLimit)
 		if err == nil {
 			return body, nil
 		}
@@ -172,7 +180,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 // attempt performs a single request. The returned bool reports whether the
 // error is transient and worth retrying (network errors, 5xx, 429). 4xx and
 // decode errors are terminal.
-func (c *Client) attempt(ctx context.Context, method, path, endpoint string, payloadBytes []byte, hasPayload bool) ([]byte, bool, error) {
+func (c *Client) attempt(ctx context.Context, method, path, endpoint string, payloadBytes []byte, hasPayload bool, accept string, responseLimit int64) ([]byte, bool, error) {
 	var body io.Reader
 	if hasPayload {
 		body = bytes.NewReader(payloadBytes)
@@ -186,7 +194,9 @@ func (c *Client) attempt(ctx context.Context, method, path, endpoint string, pay
 	if hasPayload {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("Accept", "application/json")
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -198,18 +208,39 @@ func (c *Client) attempt(ctx context.Context, method, path, endpoint string, pay
 	}
 	defer resp.Body.Close()
 
-	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	responseBody, tooLarge, readErr := readLimited(resp.Body, responseLimit)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		retryable := resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests
 		if readErr != nil {
 			return nil, retryable, fmt.Errorf("%s %s failed with %s", method, path, resp.Status)
+		}
+		if tooLarge {
+			return nil, retryable, fmt.Errorf("%s %s failed with %s: response body exceeds %d bytes", method, path, resp.Status, responseLimit)
 		}
 		return nil, retryable, fmt.Errorf("%s %s failed with %s: %s", method, path, resp.Status, strings.TrimSpace(string(responseBody)))
 	}
 	if readErr != nil {
 		return nil, true, readErr
 	}
+	if tooLarge {
+		return nil, false, fmt.Errorf("%s %s response exceeds %d bytes", method, path, responseLimit)
+	}
 	return responseBody, false, nil
+}
+
+func readLimited(r io.Reader, limit int64) ([]byte, bool, error) {
+	if limit <= 0 {
+		body, err := io.ReadAll(r)
+		return body, false, err
+	}
+	body, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(body)) > limit {
+		return body[:limit], true, nil
+	}
+	return body, false, nil
 }
 
 // backoff returns the delay before the given attempt (1-based for delays),

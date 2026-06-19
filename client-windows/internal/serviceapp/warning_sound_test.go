@@ -53,6 +53,9 @@ func TestSyncWarningSoundNoOpWhenVersionMatches(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "client.json")
 	cfg := &config.Config{WarningSoundVersion: "12-345"}
+	if err := os.WriteFile(cfg.WarningSoundPath(cfgPath), []byte("123456789012"), 0o600); err != nil {
+		t.Fatalf("seed sound: %v", err)
+	}
 	dl := &stubDownloader{data: []byte("should not be fetched")}
 
 	changed, err := syncWarningSound(context.Background(), dl, cfg, cfgPath, "12-345")
@@ -64,6 +67,59 @@ func TestSyncWarningSoundNoOpWhenVersionMatches(t *testing.T) {
 	}
 	if dl.calls != 0 {
 		t.Fatalf("downloader called %d times, want 0", dl.calls)
+	}
+}
+
+func TestSyncWarningSoundRedownloadsWhenVersionMatchesButCacheMissing(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "client.json")
+	cfg := &config.Config{WarningSoundVersion: "12-345"}
+	dl := &stubDownloader{data: []byte("fresh sound")}
+
+	changed, err := syncWarningSound(context.Background(), dl, cfg, cfgPath, "12-345")
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed=true when cache file is missing")
+	}
+	if dl.calls != 1 {
+		t.Fatalf("downloader called %d times, want 1", dl.calls)
+	}
+	got, err := os.ReadFile(cfg.WarningSoundPath(cfgPath))
+	if err != nil {
+		t.Fatalf("read cached file: %v", err)
+	}
+	if string(got) != "fresh sound" {
+		t.Fatalf("cached bytes = %q", got)
+	}
+}
+
+func TestSyncWarningSoundRedownloadsWhenVersionMatchesButCacheSizeDiffers(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "client.json")
+	cfg := &config.Config{WarningSoundVersion: "20-345"}
+	if err := os.WriteFile(cfg.WarningSoundPath(cfgPath), []byte("truncated"), 0o600); err != nil {
+		t.Fatalf("seed sound: %v", err)
+	}
+	dl := &stubDownloader{data: []byte("fresh full sound")}
+
+	changed, err := syncWarningSound(context.Background(), dl, cfg, cfgPath, "20-345")
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed=true when cache size differs")
+	}
+	if dl.calls != 1 {
+		t.Fatalf("downloader called %d times, want 1", dl.calls)
+	}
+	got, err := os.ReadFile(cfg.WarningSoundPath(cfgPath))
+	if err != nil {
+		t.Fatalf("read cached file: %v", err)
+	}
+	if string(got) != "fresh full sound" {
+		t.Fatalf("cached bytes = %q", got)
 	}
 }
 

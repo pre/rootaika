@@ -1,12 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -221,7 +221,7 @@ func TestBackoffDoublesAndCaps(t *testing.T) {
 
 func TestDownloadWarningSound(t *testing.T) {
 	ctx := context.Background()
-	want := []byte("ID3 fake mp3 bytes")
+	want := append([]byte("ID3"), bytes.Repeat([]byte(" fake mp3 bytes"), 90_000)...)
 
 	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/api/v1/warning-sound" {
@@ -233,7 +233,10 @@ func TestDownloadWarningSound(t *testing.T) {
 		if user, pass, ok := r.BasicAuth(); !ok || user != "client" || pass != "secret" {
 			t.Fatalf("missing or wrong basic auth: %q/%q", user, pass)
 		}
-		resp := testResponse(http.StatusOK, string(want))
+		if got := r.Header.Get("Accept"); got != "audio/mpeg" {
+			t.Fatalf("Accept = %q, want audio/mpeg", got)
+		}
+		resp := testResponseBytes(http.StatusOK, want)
 		resp.Header.Set("Content-Type", "audio/mpeg")
 		return resp, nil
 	})}
@@ -248,6 +251,19 @@ func TestDownloadWarningSound(t *testing.T) {
 	}
 }
 
+func TestDownloadWarningSoundRejectsOversizedResponse(t *testing.T) {
+	body := bytes.Repeat([]byte("x"), maxWarningSoundBytes+1)
+	client := New("http://rootaika.test", "client", "secret").WithHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return testResponseBytes(http.StatusOK, body), nil
+		}),
+	})
+
+	if _, err := client.DownloadWarningSound(context.Background()); err == nil {
+		t.Fatal("expected oversized warning sound to fail")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -255,10 +271,14 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func testResponse(status int, body string) *http.Response {
+	return testResponseBytes(status, []byte(body))
+}
+
+func testResponseBytes(status int, body []byte) *http.Response {
 	return &http.Response{
 		StatusCode: status,
 		Status:     http.StatusText(status),
-		Body:       io.NopCloser(strings.NewReader(body)),
+		Body:       io.NopCloser(bytes.NewReader(body)),
 		Header:     make(http.Header),
 	}
 }

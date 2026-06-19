@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"rootaika/client-windows/internal/config"
 )
@@ -18,14 +20,14 @@ type soundDownloader interface {
 // version. When the server version differs from the cached one it downloads and
 // atomically replaces the file, then records the new version. An empty server
 // version means the admin removed/never set a sound: the cache is cleared so the
-// agent falls back to silence. It returns whether the cached version changed (so
-// the caller persists config) and any error; on download error the cache is left
+// agent falls back to silence. It returns whether the cache changed (so the
+// caller persists config) and any error; on download error the cache is left
 // untouched so a transient failure does not lose a working sound.
 func syncWarningSound(ctx context.Context, dl soundDownloader, cached *config.Config, configPath, serverVersion string) (bool, error) {
-	if cached.WarningSoundVersion == serverVersion {
+	soundPath := cached.WarningSoundPath(configPath)
+	if cached.WarningSoundVersion == serverVersion && warningSoundCacheCurrent(soundPath, serverVersion) {
 		return false, nil
 	}
-	soundPath := cached.WarningSoundPath(configPath)
 
 	if serverVersion == "" {
 		_ = os.Remove(soundPath)
@@ -42,6 +44,25 @@ func syncWarningSound(ctx context.Context, dl soundDownloader, cached *config.Co
 	}
 	cached.WarningSoundVersion = serverVersion
 	return true, nil
+}
+
+func warningSoundCacheCurrent(path, serverVersion string) bool {
+	if serverVersion == "" {
+		return true
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	sizeText, _, ok := strings.Cut(serverVersion, "-")
+	if !ok {
+		return true
+	}
+	size, err := strconv.ParseInt(sizeText, 10, 64)
+	if err != nil {
+		return true
+	}
+	return info.Size() == size
 }
 
 // writeFileAtomic writes data to a temp file in the destination dir and renames
