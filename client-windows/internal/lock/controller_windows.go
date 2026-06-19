@@ -96,6 +96,7 @@ if ($script:debugShutdown) { exit 42 }
 `
 
 const debugShutdownExitCode = 42
+const createNoWindow = 0x08000000
 
 type Controller struct {
 	mu                   sync.Mutex
@@ -133,13 +134,7 @@ func (c *Controller) SetLocked(ctx context.Context, locked bool, message string,
 			_ = c.cmd.Process.Kill()
 			c.cmd = nil
 		}
-		cmd := exec.CommandContext(ctx, "powershell.exe",
-			"-NoProfile",
-			"-ExecutionPolicy", "Bypass",
-			"-WindowStyle", "Hidden",
-			"-Command", overlayScript,
-		)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		cmd := powerShellCommand(ctx, overlayScript)
 		cmd.Env = append(os.Environ(),
 			"ROOTAIKA_LOCK_MESSAGE="+message,
 			"ROOTAIKA_LOCK_DEBUG_SHUTDOWN="+boolEnv(debugShutdownAllowed),
@@ -291,12 +286,20 @@ $timer.Start()
 const playLoopScript = `
 $path = $env:ROOTAIKA_SOUND_PATH
 if (-not (Test-Path -LiteralPath $path)) { exit 0 }
-$player = New-Object -ComObject WMPlayer.OCX
-$player.settings.setMode('loop', $true)
-$player.settings.volume = 100
-$player.URL = $path
-$player.controls.play()
-while ($true) { Start-Sleep -Seconds 3600 }
+Add-Type -AssemblyName PresentationCore
+$player = New-Object System.Windows.Media.MediaPlayer
+$dispatcher = [System.Windows.Threading.Dispatcher]::CurrentDispatcher
+$player.Volume = 1.0
+$player.add_MediaEnded({
+    $player.Position = [TimeSpan]::Zero
+    $player.Play()
+})
+$player.add_MediaFailed({
+    $dispatcher.InvokeShutdown()
+})
+$player.Open([System.Uri]::new((Resolve-Path -LiteralPath $path).Path))
+$player.Play()
+[System.Windows.Threading.Dispatcher]::Run()
 `
 
 // Warn runs the pre-lock warning: it shows a click-through countdown overlay and,
@@ -309,41 +312,59 @@ func (c *Controller) Warn(ctx context.Context, message string, seconds int, soun
 		return nil
 	}
 
-	overlay := exec.CommandContext(ctx, "powershell.exe",
-		"-NoProfile",
-		"-ExecutionPolicy", "Bypass",
-		"-WindowStyle", "Hidden",
-		"-Command", warnOverlayScript,
-	)
-	overlay.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	overlay.Env = append(os.Environ(),
-		"ROOTAIKA_WARN_SECONDS="+strconv.Itoa(seconds),
-		"ROOTAIKA_LOCK_MESSAGE="+message,
-	)
-	if err := overlay.Start(); err != nil {
-		return err
-	}
-	defer func() {
-		if overlay.Process != nil {
-			_ = overlay.Process.Kill()
-		}
-	}()
-
 	// Loop the warning sound for the whole countdown. Playback is best-effort: a
 	// failure to start (no sound cached, decode error) never blocks the lock.
 	if stop := c.playLoop(ctx, soundPath); stop != nil {
 		defer stop()
 	}
 
-	// Hold until the full countdown elapses (or unlock) before returning, so the
-	// caller engages the lock overlay only when the warning is truly over.
-	if wait := time.Duration(seconds) * time.Second; wait > 0 {
+	deadline := time.Now().Add(time.Duration(seconds) * time.Second)
+	for {
+		remaining := secondsUntil(deadline)
+		if remaining <= 0 {
+			return nil
+		}
+		overlay, err := c.startWarnOverlay(ctx, message, remaining)
+		if err != nil {
+			return err
+		}
+		exited := make(chan struct{})
+		go func() {
+			_ = overlay.Wait()
+			close(exited)
+		}()
+
+		timer := time.NewTimer(time.Until(deadline))
 		select {
 		case <-ctx.Done():
-		case <-time.After(wait):
+			timer.Stop()
+			killAndWait(overlay, exited)
+			return nil
+		case <-timer.C:
+			killAndWait(overlay, exited)
+			return nil
+		case <-exited:
+			timer.Stop()
+			if secondsUntil(deadline) <= 0 {
+				return nil
+			}
+			if !pause(ctx, 200*time.Millisecond) {
+				return nil
+			}
 		}
 	}
-	return nil
+}
+
+func (c *Controller) startWarnOverlay(ctx context.Context, message string, seconds int) (*exec.Cmd, error) {
+	overlay := powerShellCommand(ctx, warnOverlayScript)
+	overlay.Env = append(os.Environ(),
+		"ROOTAIKA_WARN_SECONDS="+strconv.Itoa(seconds),
+		"ROOTAIKA_LOCK_MESSAGE="+message,
+	)
+	if err := overlay.Start(); err != nil {
+		return nil, err
+	}
+	return overlay, nil
 }
 
 // playLoop starts a background process that loops soundPath and returns a stop
@@ -353,13 +374,7 @@ func (c *Controller) playLoop(ctx context.Context, soundPath string) func() {
 	if soundPath == "" {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "powershell.exe",
-		"-NoProfile",
-		"-ExecutionPolicy", "Bypass",
-		"-WindowStyle", "Hidden",
-		"-Command", playLoopScript,
-	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd := powerShellCommand(ctx, playLoopScript)
 	cmd.Env = append(os.Environ(), "ROOTAIKA_SOUND_PATH="+soundPath)
 	if err := cmd.Start(); err != nil {
 		return nil
@@ -368,6 +383,48 @@ func (c *Controller) playLoop(ctx context.Context, soundPath string) func() {
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
+	}
+}
+
+func powerShellCommand(ctx context.Context, script string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "powershell.exe",
+		"-NoProfile",
+		"-NonInteractive",
+		"-ExecutionPolicy", "Bypass",
+		"-WindowStyle", "Hidden",
+		"-STA",
+		"-Command", script,
+	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags:    createNoWindow,
+		NoInheritHandles: true,
+	}
+	return cmd
+}
+
+func killAndWait(cmd *exec.Cmd, exited <-chan struct{}) {
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	<-exited
+}
+
+func secondsUntil(deadline time.Time) int {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return 0
+	}
+	return int((remaining + time.Second - time.Nanosecond) / time.Second)
+}
+
+func pause(ctx context.Context, duration time.Duration) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

@@ -98,7 +98,7 @@ A true exclusive-fullscreen DirectX game will not show the banner, but the loopi
 
 ### Warning sound MP3
 
-The warning sound is a single MP3 uploaded by an admin on the server's settings page (`/settings`). The server stores it on the filesystem (under `ROOTAIKA_DATA_DIR`, which defaults to the database directory) and serves it at `GET /api/v1/warning-sound`. Each client downloads and caches the file (`warning.mp3` next to `client.json`) when the server reports a new version, and plays it with the built-in Windows Media Player COM component, so no extra codec or voice package needs to be installed.
+The warning sound is a single MP3 uploaded by an admin on the server's settings page (`/settings`). The server stores it on the filesystem (under `ROOTAIKA_DATA_DIR`, which defaults to the database directory) and serves it at `GET /api/v1/warning-sound`. Each client downloads and caches the file (`warning.mp3` next to `client.json`) when the server reports a new version, and plays it with Windows' built-in media stack, so no extra codec or voice package needs to be installed.
 
 ## Test run with the PowerShell script
 
