@@ -22,7 +22,11 @@ echo "Building $ASSET ($VERSION) for windows/amd64..." >&2
     -o "$OUT" ./cmd/rootaika
 )
 
-SHA256="$(sha256sum "$OUT" | awk '{print $1}')"
+if command -v sha256sum >/dev/null 2>&1; then
+  SHA256="$(sha256sum "$OUT" | awk '{print $1}')"
+else
+  SHA256="$(shasum -a 256 "$OUT" | awk '{print $1}')"
+fi
 echo "Built $OUT" >&2
 echo "  sha256 = $SHA256" >&2
 

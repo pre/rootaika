@@ -1,9 +1,10 @@
 # rootaika Windows client
 
-The MVP client consists of two Go binaries:
+The MVP client is one combined Go binary:
 
-- `rootaika-service`: a service-style process that holds the config, buffers events in a local SQLite database, sends batches to the server, polls for config and commands, and keeps the agent running.
-- `rootaika-agent`: an agent that runs in the user session, reads idle time and the active process on Windows, sends `activity_observed` events to the service, and implements the lock/unlock base.
+- `rootaika.exe service`: a service-style process that holds the config, buffers events in a local SQLite database, sends batches to the server, polls for config and commands, and keeps the agent running.
+- `rootaika.exe agent`: an agent that runs in the user session, reads idle time and the active process on Windows, sends `activity_observed` events to the service, and implements the lock/unlock base.
+- `rootaika.exe apply-update`: a short-lived helper used by the self-update flow.
 
 ## Configuration
 
@@ -27,8 +28,8 @@ The first launch creates the config and a persistent `client_id` UUID. The key f
 The path can be passed to both binaries:
 
 ```powershell
-.\rootaika-service.exe -config C:\ProgramData\rootaika\client.json
-.\rootaika-agent.exe -config C:\ProgramData\rootaika\client.json
+.\rootaika.exe service -config C:\ProgramData\rootaika\client.json
+.\rootaika.exe agent -config C:\ProgramData\rootaika\client.json
 ```
 
 The environment variables `ROOTAIKA_SERVER_URL`, `ROOTAIKA_CLIENT_USERNAME`, `ROOTAIKA_CLIENT_PASSWORD`, and `ROOTAIKA_AGENT_LISTEN_ADDRESS` override the file values at runtime.
@@ -41,14 +42,13 @@ On a development machine:
 
 ```sh
 go test ./...
-GOOS=windows GOARCH=amd64 go build ./cmd/rootaika-service ./cmd/rootaika-agent
+GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o dist/rootaika.exe ./cmd/rootaika
 ```
 
 On Windows:
 
 ```powershell
-go build .\cmd\rootaika-service
-go build .\cmd\rootaika-agent
+.\scripts\build.ps1
 ```
 
 ## Installation with the PowerShell script
@@ -61,7 +61,7 @@ The `scripts/` directory contains installation automation. Run everything as adm
 .\scripts\build.ps1
 ```
 
-   This produces `dist\rootaika-service.exe` and `dist\rootaika-agent.exe`. The agent is linked with the `-H=windowsgui` flag, so it has no console window by default. Debug mode opens a console at runtime.
+   This produces `dist\rootaika.exe`. The binary is linked with the `-H=windowsgui` flag, so it has no console window by default. Debug mode opens a console at runtime.
 
 2. Install (open PowerShell as admin):
 
@@ -124,6 +124,39 @@ powershell -ExecutionPolicy Bypass -File "\\wsl.localhost\Ubuntu-24.04\home\prep
 ```
 
 By default the script uses the temp directory `%TEMP%\rootaika-test` and the direct LAN server URL `http://192.168.68.199:8080` until DNS is available. Using the same directory on every run means a persistent `client_id`, so the server sees the same device across reruns. Stop with `Ctrl+C`. The server and credential defaults can be changed by editing the variables at the top of the script; `-DistDir` and `-WorkDir` can be passed as parameters if your WSL distro or working directory differs from the default.
+
+## VirtualBox test run from macOS
+
+Use this when the Windows 11 VM runs on macOS and cannot build the client in WSL. The repository must be shared into the VM with VirtualBox Shared Folders.
+
+1. Start the Windows-side watcher once from the shared repository path:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\client-windows\scripts\vbox-windows-watch.ps1
+```
+
+   To start the watcher automatically when the current Windows user logs in:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\client-windows\scripts\vbox-windows-watch.ps1 -InstallAutostart
+```
+
+2. From macOS, rebuild and restart the Windows test client:
+
+```sh
+client-windows/scripts/vbox-macos-launch.sh
+```
+
+The macOS script cross-compiles `client-windows/dist/rootaika.exe`, writes a launch request under `client-windows/.vbox-launch/`, and exits. The Windows watcher sees the request, verifies the SHA256, stops old `rootaika` processes, copies the exe to `%TEMP%\rootaika-vbox`, and starts `rootaika.exe service`; the service starts the agent from the same exe.
+
+Useful overrides:
+
+```sh
+ROOTAIKA_SERVER_URL=http://192.168.68.199:8080 \
+ROOTAIKA_CLIENT_USERNAME=client \
+ROOTAIKA_CLIENT_PASSWORD=client \
+client-windows/scripts/vbox-macos-launch.sh --version dev
+```
 
 ### Network outages and server restarts
 
