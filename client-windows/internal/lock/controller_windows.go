@@ -223,6 +223,7 @@ $total = [int]$env:ROOTAIKA_WARN_SECONDS
 if ($total -le 0) { $total = 1 }
 $message = $env:ROOTAIKA_LOCK_MESSAGE
 $script:remaining = $total
+$script:completed = $false
 function Format-Remaining([int]$s) {
   if ($s -gt 60) {
     $m = [math]::Ceiling($s / 60.0)
@@ -269,12 +270,13 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1000
 $timer.Add_Tick({
     $script:remaining -= 1
-    if ($script:remaining -le 0) { $timer.Stop(); $form.Close(); return }
+    if ($script:remaining -le 0) { $script:completed = $true; $timer.Stop(); $form.Close(); return }
     $label.Text = (Format-Remaining $script:remaining) + $nl + $message
     $form.TopMost = $true
 })
 $timer.Start()
 [System.Windows.Forms.Application]::Run($form)
+if (-not $script:completed) { exit 43 }
 `
 
 // playLoopScript plays the MP3 at ROOTAIKA_SOUND_PATH on repeat until the
@@ -312,12 +314,6 @@ func (c *Controller) Warn(ctx context.Context, message string, seconds int, soun
 		return nil
 	}
 
-	// Loop the warning sound for the whole countdown. Playback is best-effort: a
-	// failure to start (no sound cached, decode error) never blocks the lock.
-	if stop := c.playLoop(ctx, soundPath); stop != nil {
-		defer stop()
-	}
-
 	deadline := time.Now().Add(time.Duration(seconds) * time.Second)
 	for {
 		remaining := secondsUntil(deadline)
@@ -334,18 +330,22 @@ func (c *Controller) Warn(ctx context.Context, message string, seconds int, soun
 			close(exited)
 		}()
 
-		timer := time.NewTimer(time.Until(deadline))
+		// Start audio after the overlay process is launched and keep it tied to
+		// the overlay's own countdown, not to a separate Go timer that can get
+		// ahead of PowerShell/WinForms startup.
+		stopSound := c.playLoop(ctx, soundPath)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
-			killAndWait(overlay, exited)
-			return nil
-		case <-timer.C:
+			if stopSound != nil {
+				stopSound()
+			}
 			killAndWait(overlay, exited)
 			return nil
 		case <-exited:
-			timer.Stop()
-			if secondsUntil(deadline) <= 0 {
+			if stopSound != nil {
+				stopSound()
+			}
+			if overlay.ProcessState != nil && overlay.ProcessState.ExitCode() == 0 {
 				return nil
 			}
 			if !pause(ctx, 200*time.Millisecond) {
