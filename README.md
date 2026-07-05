@@ -116,7 +116,7 @@ The server declares a desired client version as a triple `(version, artifact_nam
 Create a draft release; the script generates release notes from the conventional commits since the previous tag (grouped into Features / Fixes / Tests / Chores / Other) and pins the release to the current HEAD:
 
 ```sh
-make -C client-windows github-release VERSION=v1.2.3
+bin/release-github v1.2.3
 ```
 
 Open the printed link, review the notes, and press **Publish release**. Publishing creates the tag, which triggers GitHub Actions (`.github/workflows/release.yml`): it builds `rootaika.exe` inside the pinned Go image, attaches the exe, its `.sha256` file, and `install.ps1`, and appends the admin-UI triple to the notes. You author the release; the assets are built and uploaded by the `rootaika-bot` machine account (a collaborator with write access whose classic PAT, `public_repo` scope only, is the `RELEASE_BOT_TOKEN` Actions secret — the workflow's own `GITHUB_TOKEN` is read-only).

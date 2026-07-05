@@ -375,7 +375,7 @@ jobs:
 
     <section class="section" aria-label="Day-to-day flow">
       <h2>Day-to-day release flow</h2>
-<pre><code>make -C client-windows github-release VERSION=v1.3.0
+<pre><code>bin/release-github v1.3.0
 # open the printed draft link, review the notes, press "Publish release"
 # publishing creates the tag; Actions builds and attaches the assets and
 # appends the triple to the notes; paste it into the admin UI (Versiot)

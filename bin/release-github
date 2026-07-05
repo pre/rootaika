@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# One-command release entry point: drafts the GitHub release (generated notes,
+# pinned to HEAD) for review in the browser. Publishing the draft creates the
+# tag and triggers the build workflow. See README.md "Publishing a release".
+#
+# Usage: bin/release-github v1.2.3
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 <version-tag>   e.g. $0 v1.2.3" >&2
+  exit 2
+fi
+
+exec make -C "$(dirname "$0")/../client-windows" github-release VERSION="$1"
