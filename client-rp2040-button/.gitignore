@@ -1,5 +1,4 @@
 wifi.h
 build/
-simdata/
 *.uf2
 .DS_Store

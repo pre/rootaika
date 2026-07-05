@@ -1,0 +1,10 @@
+#pragma once
+// Copy this file to wifi.h and fill in your own values.
+// wifi.h is gitignored and never committed.
+#define SECRET_SSID "MyWiFiNetwork"
+#define SECRET_PASS "password"
+// Go server address and HTTP Basic Auth (client role).
+// Generate the base64 with: echo -n 'client:client' | base64
+#define ROOTAIKA_HOST "192.168.1.10"
+#define ROOTAIKA_PORT 8080
+#define ROOTAIKA_AUTH_B64 "Y2xpZW50OmNsaWVudA=="

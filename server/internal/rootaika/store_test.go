@@ -326,7 +326,7 @@ func TestSetDeviceLockUnlockClearsMessage(t *testing.T) {
 	}
 }
 
-func TestToggleAllLocksAppliesWarningOnLockAndClearsOnUnlock(t *testing.T) {
+func TestLockAllLocksAppliesWarningAndUnlockClears(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	device, err := store.EnsureDevice(ctx, "client-1", fixedNow())
@@ -341,12 +341,12 @@ func TestToggleAllLocksAppliesWarningOnLockAndClearsOnUnlock(t *testing.T) {
 		t.Fatalf("assign: %v", err)
 	}
 
-	locked, affected, err := store.ToggleAllLocks(ctx, "Nappi painettu", 60, fixedNow())
+	affected, err := store.LockAllLocks(ctx, "Nappi painettu", 60, fixedNow())
 	if err != nil {
-		t.Fatalf("toggle lock: %v", err)
+		t.Fatalf("lock all: %v", err)
 	}
-	if !locked || affected != 1 {
-		t.Fatalf("toggle lock = (locked=%t, affected=%d), want (true, 1)", locked, affected)
+	if affected != 1 {
+		t.Fatalf("lock all affected = %d, want 1", affected)
 	}
 	config, err := store.ClientConfig(ctx, "client-1", fixedNow())
 	if err != nil {
@@ -356,12 +356,21 @@ func TestToggleAllLocksAppliesWarningOnLockAndClearsOnUnlock(t *testing.T) {
 		t.Fatalf("config = %+v, want locked with message and 60s warning", config)
 	}
 
-	locked, _, err = store.ToggleAllLocks(ctx, "Nappi painettu", 60, fixedNow().Add(time.Minute))
-	if err != nil {
-		t.Fatalf("toggle unlock: %v", err)
+	// Locking again while already locked stays locked (idempotent for a button
+	// that does not know the current state).
+	if _, err := store.LockAllLocks(ctx, "Nappi painettu", 60, fixedNow().Add(time.Minute)); err != nil {
+		t.Fatalf("second lock all: %v", err)
 	}
-	if locked {
-		t.Fatalf("second toggle locked = true, want false (unlock)")
+	config, err = store.ClientConfig(ctx, "client-1", fixedNow())
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	if !config.Locked {
+		t.Fatalf("config = %+v, want still locked after second lock", config)
+	}
+
+	if _, err := store.UnlockAllLocks(ctx, fixedNow().Add(2*time.Minute)); err != nil {
+		t.Fatalf("unlock all: %v", err)
 	}
 	config, err = store.ClientConfig(ctx, "client-1", fixedNow())
 	if err != nil {

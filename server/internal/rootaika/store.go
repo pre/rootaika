@@ -126,7 +126,17 @@ CREATE TABLE IF NOT EXISTS devices (
   created_at_utc TEXT NOT NULL,
   last_seen_at_utc TEXT NOT NULL,
   last_status TEXT NOT NULL DEFAULT '',
-  last_status_at_utc TEXT NOT NULL DEFAULT ''
+  last_status_at_utc TEXT NOT NULL DEFAULT '',
+  selected_version_id INTEGER,
+  last_client_version TEXT NOT NULL DEFAULT '',
+  last_client_version_at_utc TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS client_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  version TEXT NOT NULL,
+  artifact_name TEXT NOT NULL DEFAULT '',
+  sha256 TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -200,7 +210,16 @@ CREATE INDEX IF NOT EXISTS lock_audit_time_idx ON lock_audit(occurred_at_utc);
 	if err := s.ensureColumn(ctx, "devices", "last_status", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.ensureColumn(ctx, "devices", "last_status_at_utc", "TEXT NOT NULL DEFAULT ''")
+	if err := s.ensureColumn(ctx, "devices", "last_status_at_utc", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "devices", "selected_version_id", "INTEGER"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "devices", "last_client_version", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.ensureColumn(ctx, "devices", "last_client_version_at_utc", "TEXT NOT NULL DEFAULT ''")
 }
 
 // ensureColumn adds a column to an existing table when it is missing, so older
@@ -244,6 +263,7 @@ func (s *Store) seed(ctx context.Context, now time.Time) error {
 		"board_refresh_seconds":     "60",
 		"debug_mode":                "0",
 		"debug_unassigned_clients":  "0",
+		"selected_version_id":       "0",
 	}
 	for key, value := range defaults {
 		if _, err := s.db.ExecContext(ctx, `
@@ -325,7 +345,7 @@ VALUES (?, ?, 'unassigned', ?, ?)`,
 
 		device, err = scanDeviceRow(tx.QueryRowContext(ctx, `
 SELECT d.id, d.client_uuid, d.display_name, d.user_id, COALESCE(u.name, ''),
-       d.registration_status, d.created_at_utc, d.last_seen_at_utc
+       d.registration_status, d.created_at_utc, d.last_seen_at_utc, d.selected_version_id
 FROM devices d
 LEFT JOIN users u ON u.id = d.user_id
 WHERE d.client_uuid = ?`, clientUUID))
@@ -424,7 +444,108 @@ FROM device_config WHERE device_id = ?`, device.ID).
 		return ClientConfig{}, err
 	}
 	config.Categories = categories
+
+	// OTA: resolve the effective version selection (device override, else the
+	// global selection) to its registered triple. A selection pointing at a
+	// deleted record resolves to empty = no update offered.
+	effectiveID := int64(settings.SelectedVersionID)
+	if device.SelectedVersionID != nil {
+		effectiveID = *device.SelectedVersionID
+	}
+	if effectiveID > 0 {
+		err := s.db.QueryRowContext(ctx, `
+SELECT version, artifact_name, sha256 FROM client_versions WHERE id = ?`, effectiveID).
+			Scan(&config.DesiredVersion, &config.ArtifactName, &config.SHA256)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return ClientConfig{}, err
+		}
+	}
 	return config, nil
+}
+
+// RecordDeviceVersion stores the running version the client reported during a
+// config poll. Persists only when the value changes, so routine polls do not
+// churn the row (the timestamp alone is not a reason to rewrite).
+func (s *Store) RecordDeviceVersion(ctx context.Context, deviceID int64, version string, now time.Time) error {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE devices SET last_client_version = ?, last_client_version_at_utc = ?
+WHERE id = ? AND last_client_version <> ?`,
+		version, formatDBTime(now), deviceID, version)
+	return err
+}
+
+func (s *Store) Versions(ctx context.Context) ([]ClientVersion, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, version, artifact_name, sha256 FROM client_versions ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var versions []ClientVersion
+	for rows.Next() {
+		var v ClientVersion
+		if err := rows.Scan(&v.ID, &v.Version, &v.ArtifactName, &v.SHA256); err != nil {
+			return nil, err
+		}
+		versions = append(versions, v)
+	}
+	return versions, rows.Err()
+}
+
+func (s *Store) CreateVersion(ctx context.Context, version, artifact, sha256 string) error {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return errors.New("version is required")
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO client_versions(version, artifact_name, sha256) VALUES (?, ?, ?)`,
+		version, strings.TrimSpace(artifact), strings.TrimSpace(sha256))
+	return err
+}
+
+// UpdateVersion edits a registered version record in place, so every global or
+// per-device selection pointing at it picks up the fix automatically.
+func (s *Store) UpdateVersion(ctx context.Context, id int64, version, artifact, sha256 string) error {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return errors.New("version is required")
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE client_versions SET version = ?, artifact_name = ?, sha256 = ? WHERE id = ?`,
+		version, strings.TrimSpace(artifact), strings.TrimSpace(sha256), id)
+	return err
+}
+
+// DeleteVersion removes a registered version and resets any global or
+// per-device selection that pointed at it back to none, so no selection is left
+// dangling.
+func (s *Store) DeleteVersion(ctx context.Context, id int64, now time.Time) error {
+	return s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM client_versions WHERE id = ?`, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+UPDATE devices SET selected_version_id = NULL WHERE selected_version_id = ?`, id); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `
+UPDATE settings SET value = '0', updated_at_utc = ? WHERE key = 'selected_version_id' AND value = ?`,
+			formatDBTime(now), strconv.FormatInt(id, 10))
+		return err
+	})
+}
+
+// SetDeviceVersion sets the per-device OTA version selection. nil clears the
+// override so the device inherits the global selection again.
+func (s *Store) SetDeviceVersion(ctx context.Context, deviceID int64, versionID *int64) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE devices SET selected_version_id = ? WHERE id = ?`, nullableInt64(versionID), deviceID)
+	return err
 }
 
 // SetDeviceLock sets the persistent lock state for a device. The client reads it
@@ -467,50 +588,25 @@ VALUES (?, ?, ?, ?, ?, ?)`,
 	return err
 }
 
-// ToggleAllLocks flips the lock state of every registered (assigned) device in a
-// single transaction. If any registered device is currently locked, all are
-// unlocked; otherwise all are locked with the given message and warningSeconds
-// countdown, so clients play the warning sound and show a click-through overlay
-// before the screen locks. It returns the resulting lock state and the number of
-// devices affected. This backs the physical board button, which has a single push
-// for both lock and release.
-func (s *Store) ToggleAllLocks(ctx context.Context, message string, warningSeconds int, now time.Time) (bool, int, error) {
-	var locked bool
-	var affected int
-	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var lockedCount int
-		if err := tx.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM device_config c
-JOIN devices d ON d.id = c.device_id
-WHERE d.registration_status = 'assigned' AND c.locked = 1`).Scan(&lockedCount); err != nil {
-			return err
-		}
-
-		locked = lockedCount == 0
-		newMessage := message
-		newWarning := warningSeconds
-		if !locked {
-			newMessage = ""
-			newWarning = 0
-		}
-		result, err := tx.ExecContext(ctx, `
-UPDATE device_config SET locked = ?, lock_message = ?, warning_seconds = ?
+// LockAllLocks unconditionally locks every registered (assigned) device with the
+// given message and warningSeconds countdown, so clients play the warning sound
+// and show a click-through overlay before the screen locks. It returns the
+// number of devices affected. This backs the physical board button, whose short
+// press always means "lock" (long press releases via UnlockAllLocks); the button
+// does not know the current state, so the action must be idempotent.
+func (s *Store) LockAllLocks(ctx context.Context, message string, warningSeconds int, now time.Time) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE device_config SET locked = 1, lock_message = ?, warning_seconds = ?
 WHERE device_id IN (SELECT id FROM devices WHERE registration_status = 'assigned')`,
-			boolToInt(locked), newMessage, newWarning)
-		if err != nil {
-			return err
-		}
-		rows, _ := result.RowsAffected()
-		affected = int(rows)
-		return nil
-	})
+		message, warningSeconds)
 	if err != nil {
-		return false, 0, err
+		return 0, err
 	}
-	if err := s.recordLockAudit(ctx, nil, locked, LockSourceBoardButton, affected, now); err != nil {
-		return false, 0, err
+	affected, _ := result.RowsAffected()
+	if err := s.recordLockAudit(ctx, nil, true, LockSourceBoardButton, int(affected), now); err != nil {
+		return 0, err
 	}
-	return locked, affected, nil
+	return int(affected), nil
 }
 
 // UnlockAllLocks unconditionally clears the lock on every registered (assigned)
@@ -568,6 +664,7 @@ func (s *Store) Devices(ctx context.Context) ([]Device, error) {
 SELECT d.id, d.client_uuid, d.display_name, d.user_id, COALESCE(u.name, ''),
        d.registration_status, d.created_at_utc, d.last_seen_at_utc,
        d.last_status, d.last_status_at_utc,
+       d.selected_version_id, d.last_client_version, d.last_client_version_at_utc,
        COALESCE(c.locked, 0), COALESCE(c.warning_seconds, 0)
 FROM devices d
 LEFT JOIN users u ON u.id = d.user_id
@@ -581,20 +678,27 @@ ORDER BY d.display_name COLLATE NOCASE, d.id`)
 	var devices []Device
 	for rows.Next() {
 		var device Device
-		var userID sql.NullInt64
-		var created, lastSeen, lastStatusAt string
+		var userID, versionID sql.NullInt64
+		var created, lastSeen, lastStatusAt, lastVersionAt string
 		if err := rows.Scan(&device.ID, &device.ClientUUID, &device.DisplayName, &userID, &device.UserName,
 			&device.RegistrationStatus, &created, &lastSeen, &device.LastStatus, &lastStatusAt,
+			&versionID, &device.LastClientVersion, &lastVersionAt,
 			&device.Locked, &device.WarningSeconds); err != nil {
 			return nil, err
 		}
 		if userID.Valid {
 			device.UserID = &userID.Int64
 		}
+		if versionID.Valid {
+			device.SelectedVersionID = &versionID.Int64
+		}
 		device.CreatedAt = parseDBTime(created)
 		device.LastSeenAt = parseDBTime(lastSeen)
 		if lastStatusAt != "" {
 			device.LastStatusAt = parseDBTime(lastStatusAt)
+		}
+		if lastVersionAt != "" {
+			device.LastClientVersionAt = parseDBTime(lastVersionAt)
 		}
 		devices = append(devices, device)
 	}
@@ -699,6 +803,7 @@ func (s *Store) UpdateSettings(ctx context.Context, settings Settings, now time.
 			"board_refresh_seconds":     settings.BoardRefreshSeconds,
 			"debug_mode":                boolToInt(settings.DebugMode),
 			"debug_unassigned_clients":  boolToInt(settings.DebugUnassignedClients),
+			"selected_version_id":       settings.SelectedVersionID,
 		}
 		for key, value := range values {
 			if _, err := tx.ExecContext(ctx, `
@@ -882,14 +987,17 @@ ORDER BY occurred_at_utc ASC, sequence ASC, id ASC`, deviceID, formatDBTime(star
 
 func scanDeviceRow(row *sql.Row) (Device, error) {
 	var device Device
-	var userID sql.NullInt64
+	var userID, versionID sql.NullInt64
 	var created, lastSeen string
 	if err := row.Scan(&device.ID, &device.ClientUUID, &device.DisplayName, &userID, &device.UserName,
-		&device.RegistrationStatus, &created, &lastSeen); err != nil {
+		&device.RegistrationStatus, &created, &lastSeen, &versionID); err != nil {
 		return Device{}, err
 	}
 	if userID.Valid {
 		device.UserID = &userID.Int64
+	}
+	if versionID.Valid {
+		device.SelectedVersionID = &versionID.Int64
 	}
 	device.CreatedAt = parseDBTime(created)
 	device.LastSeenAt = parseDBTime(lastSeen)
@@ -954,6 +1062,7 @@ func settingsFromValues(values map[string]int) Settings {
 		BoardRefreshSeconds:    defaultInt(values["board_refresh_seconds"], 60),
 		DebugMode:              values["debug_mode"] != 0,
 		DebugUnassignedClients: values["debug_unassigned_clients"] != 0,
+		SelectedVersionID:      values["selected_version_id"],
 	}
 }
 

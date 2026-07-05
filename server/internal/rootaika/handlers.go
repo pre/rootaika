@@ -174,6 +174,15 @@ func (a *App) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The client also reports its running version in the same poll (OTA update);
+	// the admin UI shows it next to the desired version.
+	if clientVersion := r.URL.Query().Get("client_version"); clientVersion != "" {
+		if err := a.store.RecordDeviceVersion(r.Context(), config.DeviceID, clientVersion, a.now()); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "record version failed")
+			return
+		}
+	}
+
 	// Long poll: when the client passes wait and its last-seen version still
 	// matches the current config, hold the request open so a later change is
 	// delivered the instant it happens instead of at the next poll interval.
@@ -256,6 +265,9 @@ func (a *App) writeClientConfig(w http.ResponseWriter, clientID string, config C
 		"lock_message":              config.LockMessage,
 		"warning_seconds":           config.WarningSeconds,
 		"warning_sound_version":     config.WarningSoundVersion,
+		"desired_version":           config.DesiredVersion,
+		"artifact_name":             config.ArtifactName,
+		"sha256":                    config.SHA256,
 		"categories":                categories,
 	})
 }
@@ -296,6 +308,14 @@ func (a *App) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		a.adminAssignDevice(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "devices" && parts[2] == "delete":
 		a.adminDeleteDevice(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "devices" && parts[2] == "version":
+		a.adminDeviceVersion(w, r, parts[1])
+	case len(parts) == 1 && parts[0] == "versions":
+		a.adminCreateVersion(w, r)
+	case len(parts) == 3 && parts[0] == "versions" && parts[2] == "edit":
+		a.adminEditVersion(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "versions" && parts[2] == "delete":
+		a.adminDeleteVersion(w, r, parts[1])
 	case len(parts) == 1 && parts[0] == "settings":
 		a.adminSettings(w, r)
 	case len(parts) == 2 && parts[0] == "settings" && parts[1] == "warning-sound":
@@ -429,6 +449,68 @@ func (a *App) adminDeleteCategory(w http.ResponseWriter, r *http.Request, rawID 
 	redirect(w, r, "/settings#categories")
 }
 
+func (a *App) adminCreateVersion(w http.ResponseWriter, r *http.Request) {
+	err := a.store.CreateVersion(r.Context(), r.FormValue("version"), r.FormValue("artifact"), r.FormValue("sha256"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	redirect(w, r, "/settings#versions")
+}
+
+func (a *App) adminEditVersion(w http.ResponseWriter, r *http.Request, rawID string) {
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid version id", http.StatusBadRequest)
+		return
+	}
+	if err := a.store.UpdateVersion(r.Context(), id, r.FormValue("version"), r.FormValue("artifact"), r.FormValue("sha256")); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	a.notifier.notify()
+	redirect(w, r, "/settings#versions")
+}
+
+func (a *App) adminDeleteVersion(w http.ResponseWriter, r *http.Request, rawID string) {
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid version id", http.StatusBadRequest)
+		return
+	}
+	if err := a.store.DeleteVersion(r.Context(), id, a.now()); err != nil {
+		http.Error(w, "delete version failed", http.StatusInternalServerError)
+		return
+	}
+	a.notifier.notify()
+	redirect(w, r, "/settings#versions")
+}
+
+// adminDeviceVersion sets the per-device OTA version selection. 0 (or blank)
+// clears the override so the device inherits the global selection.
+func (a *App) adminDeviceVersion(w http.ResponseWriter, r *http.Request, rawDeviceID string) {
+	deviceID, err := strconv.ParseInt(rawDeviceID, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid device id", http.StatusBadRequest)
+		return
+	}
+	var versionID *int64
+	if raw := strings.TrimSpace(r.FormValue("selected_version_id")); raw != "" && raw != "0" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			http.Error(w, "invalid version id", http.StatusBadRequest)
+			return
+		}
+		versionID = &parsed
+	}
+	if err := a.store.SetDeviceVersion(r.Context(), deviceID, versionID); err != nil {
+		http.Error(w, "set device version failed", http.StatusInternalServerError)
+		return
+	}
+	a.notifier.notify()
+	redirect(w, r, "/settings#devices")
+}
+
 func (a *App) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.CreateUser(r.Context(), r.FormValue("name"), a.now()); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -475,6 +557,12 @@ func settingsFromForm(r *http.Request) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
+	// Global OTA selection: 0 / blank / invalid all mean "no version selected",
+	// so the field is optional and never fails the whole settings form.
+	selectedVersion, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("selected_version_id")))
+	if selectedVersion < 0 {
+		selectedVersion = 0
+	}
 	return Settings{
 		IdleThresholdSeconds:   idle,
 		UploadIntervalSeconds:  upload,
@@ -484,6 +572,7 @@ func settingsFromForm(r *http.Request) (Settings, error) {
 		BoardRefreshSeconds:    boardRefresh,
 		DebugMode:              checkboxForm(r, "debug_mode"),
 		DebugUnassignedClients: checkboxForm(r, "debug_unassigned_clients"),
+		SelectedVersionID:      selectedVersion,
 	}, nil
 }
 

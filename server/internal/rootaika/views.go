@@ -21,6 +21,10 @@ type deviceView struct {
 	TotalSeconds int64
 	Processes    []processView
 	LockState    string
+	// OTA fields shown on the settings page only: the version tag the device
+	// resolves to and whether it comes from a per-device override.
+	TargetVersion    string
+	TargetIsOverride bool
 }
 
 type processView struct {
@@ -154,6 +158,12 @@ func formatLocalPtr(t *time.Time) string {
 
 func selectedUser(userID int64, deviceUserID *int64) bool {
 	return deviceUserID != nil && *deviceUserID == userID
+}
+
+// selectedVersion marks the device's own OTA version selection in the
+// per-device dropdown; nil (inherit global) selects the "Globaali oletus" row.
+func selectedVersion(versionID int64, deviceVersionID *int64) bool {
+	return deviceVersionID != nil && *deviceVersionID == versionID
 }
 
 // deviceLabel renders a collapsible section title as "User name (device id)",

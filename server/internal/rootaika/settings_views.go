@@ -16,6 +16,10 @@ type settingsData struct {
 	Categories          []ProgramCategory
 	WarningSoundEnabled bool
 	WarningSoundVersion string
+	Versions            []ClientVersion
+	// GlobalVersionID mirrors Settings.SelectedVersionID as int64 so the
+	// template can compare it against ClientVersion.ID with eq.
+	GlobalVersionID int64
 }
 
 func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -54,10 +58,31 @@ func (a *App) settingsViewData(r *http.Request, role Role) (settingsData, error)
 	if err != nil {
 		return settingsData{}, err
 	}
+	versions, err := a.store.Versions(ctx)
+	if err != nil {
+		return settingsData{}, err
+	}
+
+	versionByID := make(map[int64]ClientVersion, len(versions))
+	for _, v := range versions {
+		versionByID[v.ID] = v
+	}
 
 	deviceViews := make([]deviceView, 0, len(devices))
 	for _, device := range devices {
-		deviceViews = append(deviceViews, deviceView{Device: device, LockState: lockState(device)})
+		view := deviceView{Device: device, LockState: lockState(device)}
+		// The OTA target this device resolves to: its own selection when set,
+		// otherwise the global selection. Empty when neither points at a
+		// registered version.
+		effectiveID := int64(settings.SelectedVersionID)
+		if device.SelectedVersionID != nil {
+			effectiveID = *device.SelectedVersionID
+			view.TargetIsOverride = true
+		}
+		if target, ok := versionByID[effectiveID]; ok {
+			view.TargetVersion = target.Version
+		}
+		deviceViews = append(deviceViews, view)
 	}
 
 	return settingsData{
@@ -70,12 +95,15 @@ func (a *App) settingsViewData(r *http.Request, role Role) (settingsData, error)
 		Categories:          categories,
 		WarningSoundEnabled: a.warningSound.enabled(),
 		WarningSoundVersion: a.warningSound.version(),
+		Versions:            versions,
+		GlobalVersionID:     int64(settings.SelectedVersionID),
 	}, nil
 }
 
 var settingsTemplate = template.Must(template.New("settings").Funcs(template.FuncMap{
-	"formatTime":   formatLocal,
-	"selectedUser": selectedUser,
+	"formatTime":      formatLocal,
+	"selectedUser":    selectedUser,
+	"selectedVersion": selectedVersion,
 }).Parse(`<!doctype html>
 <html lang="fi">
 <head>
@@ -133,7 +161,7 @@ var settingsTemplate = template.Must(template.New("settings").Funcs(template.Fun
     <section id="devices">
       <h2>Laitteet</h2>
       <table>
-        <thead><tr><th>ID</th><th>Nimi</th><th>UUID</th><th>Käyttäjä</th><th>Tila</th><th>Viimeksi nähty</th><th>Admin</th></tr></thead>
+        <thead><tr><th>ID</th><th>Nimi</th><th>UUID</th><th>Käyttäjä</th><th>Tila</th><th>Viimeksi nähty</th><th>Versio</th><th>Admin</th></tr></thead>
         <tbody>
         {{range .Devices}}
         {{$device := .}}
@@ -144,6 +172,10 @@ var settingsTemplate = template.Must(template.New("settings").Funcs(template.Fun
             <td>{{if .Device.UserName}}{{.Device.UserName}}{{else}}<span class="muted">ei liitetty</span>{{end}}</td>
             <td>{{.Device.RegistrationStatus}}<br><span class="muted">{{.LockState}}</span></td>
             <td>{{formatTime .Device.LastSeenAt}}</td>
+            <td>
+              {{if .Device.LastClientVersion}}<code>{{.Device.LastClientVersion}}</code><br><span class="muted">{{formatTime .Device.LastClientVersionAt}}</span>{{else}}<span class="muted">-</span>{{end}}
+              {{if .TargetVersion}}<br><span class="muted">→ {{.TargetVersion}}{{if .TargetIsOverride}} (laite){{end}}</span>{{end}}
+            </td>
             <td class="actions">
               {{if $.ReadOnly}}<span class="muted">read-only</span>{{else}}
               <form method="post" action="/admin/devices/{{.Device.ID}}/assign" class="stack">
@@ -160,12 +192,19 @@ var settingsTemplate = template.Must(template.New("settings").Funcs(template.Fun
                 <button class="warn" type="submit">Lock</button>
               </form>
               <form method="post" action="/admin/devices/{{.Device.ID}}/unlock"><button type="submit">Unlock</button></form>
+              <form method="post" action="/admin/devices/{{.Device.ID}}/version" class="stack">
+                <select name="selected_version_id" aria-label="Versio">
+                  <option value="0">Globaali oletus</option>
+                  {{range $.Versions}}<option value="{{.ID}}" {{if selectedVersion .ID $device.Device.SelectedVersionID}}selected{{end}}>{{.Version}}{{if .ArtifactName}} ({{.ArtifactName}}){{end}}</option>{{end}}
+                </select>
+                <button class="secondary" type="submit">Aseta versio</button>
+              </form>
               <form method="post" action="/admin/devices/{{.Device.ID}}/delete"><button class="secondary" type="submit" onclick="return confirm('Poistetaanko laite ja sen tapahtumat pysyvästi?')">Poista</button></form>
               {{end}}
             </td>
           </tr>
         {{else}}
-          <tr><td colspan="7" class="muted">Ei laitteita.</td></tr>
+          <tr><td colspan="8" class="muted">Ei laitteita.</td></tr>
         {{end}}
         </tbody>
       </table>
@@ -214,6 +253,12 @@ var settingsTemplate = template.Must(template.New("settings").Funcs(template.Fun
         <label class="stack">Taulun päivitysväli, s<input name="board_refresh_seconds" type="number" min="1" value="{{.Settings.BoardRefreshSeconds}}" {{if .ReadOnly}}disabled{{end}}></label>
         <label class="inline"><input name="debug_mode" type="checkbox" value="on" {{if .Settings.DebugMode}}checked{{end}} {{if .ReadOnly}}disabled{{end}}> Debug-tila (näytä clientin konsoli)</label>
         <label class="inline"><input name="debug_unassigned_clients" type="checkbox" value="on" {{if .Settings.DebugUnassignedClients}}checked{{end}} {{if .ReadOnly}}disabled{{end}}> Debug-tila rekisteröimättömille clienteille</label>
+        <label class="stack">Haluttu client-versio (globaali)
+          <select name="selected_version_id" {{if .ReadOnly}}disabled{{end}}>
+            <option value="0">Ei versiota</option>
+            {{range .Versions}}<option value="{{.ID}}" {{if eq .ID $.GlobalVersionID}}selected{{end}}>{{.Version}}{{if .ArtifactName}} ({{.ArtifactName}}){{end}}</option>{{end}}
+          </select>
+        </label>
         {{if not .ReadOnly}}<div><button type="submit">Tallenna asetukset</button></div>{{end}}
       </form>
 
@@ -232,6 +277,39 @@ var settingsTemplate = template.Must(template.New("settings").Funcs(template.Fun
         {{end}}
       {{else}}
         <p class="muted">Ääntä ei voi tallentaa: palvelimen data-hakemistoa ei ole määritetty.</p>
+      {{end}}
+    </section>
+
+    <section id="versions">
+      <h2>Versiot</h2>
+      <p class="muted">Rekisteröidyt client-versiot. Valitse käyttöön otettava versio Asetukset-osiossa (globaali) tai laitekohtaisesti Laitteet-taulukosta.</p>
+      <table class="compact">
+        <thead><tr><th>Versio</th><th>Artifakti</th><th>SHA256</th><th></th></tr></thead>
+        <tbody>
+        {{range .Versions}}
+          {{if $.ReadOnly}}
+          <tr><td><code>{{.Version}}</code></td><td>{{.ArtifactName}}</td><td><code>{{.SHA256}}</code></td><td></td></tr>
+          {{else}}
+          <tr><td colspan="4">
+            <form method="post" action="/admin/versions/{{.ID}}/edit" class="inline">
+              <input name="version" value="{{.Version}}" placeholder="v1.2.0" required aria-label="Versio" style="min-width:110px">
+              <input name="artifact" value="{{.ArtifactName}}" placeholder="rootaika.exe" aria-label="Artifakti" style="min-width:150px">
+              <input name="sha256" value="{{.SHA256}}" placeholder="sha256" aria-label="SHA256" style="min-width:260px">
+              <button class="secondary" type="submit">Tallenna</button>
+            </form>
+            <form method="post" action="/admin/versions/{{.ID}}/delete" style="display:inline"><button class="secondary" type="submit" onclick="return confirm('Poistetaanko versio? Valinnat palautuvat oletukseen.')">Poista</button></form>
+          </td></tr>
+          {{end}}
+        {{else}}<tr><td colspan="4" class="muted">Ei rekisteröityjä versioita.</td></tr>{{end}}
+        </tbody>
+      </table>
+      {{if not .ReadOnly}}
+      <form method="post" action="/admin/versions" class="inline">
+        <input name="version" placeholder="v1.2.0" required aria-label="Versio">
+        <input name="artifact" placeholder="rootaika.exe" aria-label="Artifakti">
+        <input name="sha256" placeholder="sha256" aria-label="SHA256">
+        <button type="submit">Lisää versio</button>
+      </form>
       {{end}}
     </section>
 

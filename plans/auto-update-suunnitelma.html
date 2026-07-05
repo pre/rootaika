@@ -301,6 +301,17 @@ var Version = "dev"</code></pre>
 
     <section class="section" aria-label="Server-side version config">
       <h2>4. Server-side version config (global + per-device)</h2>
+      <div class="note">
+        <strong>Implemented differently.</strong> The shipped Go server (and the earlier RP2040
+        server it was ported from) replaces the raw triples below with a <em>version registry +
+        selection</em> model: triples are registered once in a <code>client_versions</code> table
+        and the global (<code>settings.selected_version_id</code>) and per-device
+        (<code>devices.selected_version_id</code>) selections point at a registry row by id, so
+        fixing a wrong sha256 is a single in-place edit. The string-settings refactor below was
+        therefore never needed. The reported-version param is <code>client_version</code> (renamed
+        to stay distinct from long-poll's <code>config_version</code>). See the deviations table in
+        <code>ruutuaika-suunnitelma.html</code>.
+      </div>
       <p>
         A version is a triple <code>(version_tag, artifact_name, sha256)</code> so a per-device
         override stays self-consistent with a different release.

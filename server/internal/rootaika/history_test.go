@@ -166,8 +166,8 @@ func TestBoardLockActionsRecordAudit(t *testing.T) {
 		t.Fatalf("assign: %v", err)
 	}
 
-	if _, _, err := store.ToggleAllLocks(ctx, "kaikki kiinni", 60, fixedNow()); err != nil {
-		t.Fatalf("toggle: %v", err)
+	if _, err := store.LockAllLocks(ctx, "kaikki kiinni", 60, fixedNow()); err != nil {
+		t.Fatalf("lock all: %v", err)
 	}
 	if _, err := store.UnlockAllLocks(ctx, fixedNow().Add(time.Minute)); err != nil {
 		t.Fatalf("unlock all: %v", err)

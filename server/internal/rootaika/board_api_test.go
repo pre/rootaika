@@ -109,7 +109,7 @@ func TestBoardButtonRequiresAuth(t *testing.T) {
 	}
 }
 
-func TestBoardButtonTogglesAllAssignedDevices(t *testing.T) {
+func TestBoardButtonLocksAllAssignedDevices(t *testing.T) {
 	app := testApp(t)
 	ctx := context.Background()
 
@@ -154,13 +154,14 @@ func TestBoardButtonTogglesAllAssignedDevices(t *testing.T) {
 		t.Fatalf("warning_seconds = %d, want %d", config.WarningSeconds, boardButtonWarningSeconds)
 	}
 
-	// Second press releases all of them.
+	// A second press keeps everything locked: the button always means "lock"
+	// (release is the separate /api/v1/unlock call), so it is idempotent.
 	locked, affected = pressBoardButton(t, app)
-	if locked || affected != 2 {
-		t.Fatalf("second press: locked=%v affected=%d, want false/2", locked, affected)
+	if !locked || affected != 2 {
+		t.Fatalf("second press: locked=%v affected=%d, want true/2", locked, affected)
 	}
-	assertDeviceLock(t, app, "client-1", false, "")
-	assertDeviceLock(t, app, "client-2", false, "")
+	assertDeviceLock(t, app, "client-1", true, boardButtonMessage)
+	assertDeviceLock(t, app, "client-2", true, boardButtonMessage)
 }
 
 func TestBoardUnlockRequiresAuth(t *testing.T) {
@@ -264,7 +265,7 @@ func TestLockStatusRequiresAuth(t *testing.T) {
 	}
 }
 
-func TestLockStatusReflectsGlobalStateAndTracksToggle(t *testing.T) {
+func TestLockStatusReflectsGlobalStateAndTracksButton(t *testing.T) {
 	app := testApp(t)
 	ctx := context.Background()
 
@@ -306,9 +307,13 @@ func TestLockStatusReflectsGlobalStateAndTracksToggle(t *testing.T) {
 		t.Fatalf("locked status: locked=%v lockedCount=%d totalCount=%d, want true/2/2", locked, lockedCount, totalCount)
 	}
 
-	// A second press releases, and status returns to unlocked.
-	if pressed, _ := pressBoardButton(t, app); pressed {
-		t.Fatalf("expected second press to unlock")
+	// The board unlock releases everything, and status returns to unlocked.
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/unlock", nil)
+	request.SetBasicAuth("client", "client")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unlock status = %d body=%s", recorder.Code, recorder.Body.String())
 	}
 	locked, lockedCount, _ = lockStatus(t, app)
 	if locked || lockedCount != 0 {
@@ -317,7 +322,7 @@ func TestLockStatusReflectsGlobalStateAndTracksToggle(t *testing.T) {
 }
 
 // TestLockStatusLockedWhenAnyDeviceLocked verifies the global state is "locked"
-// as soon as a single device is locked, matching the toggle's semantics.
+// as soon as a single device is locked.
 func TestLockStatusLockedWhenAnyDeviceLocked(t *testing.T) {
 	app := testApp(t)
 	ctx := context.Background()

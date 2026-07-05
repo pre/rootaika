@@ -30,10 +30,11 @@ const boardButtonMessage = "Nappi painettu"
 // Matches the per-device admin lock form default.
 const boardButtonWarningSeconds = 60
 
-// handleBoardButton toggles the lock state of all registered devices from a
-// single physical button press on the board. It uses the client role so the Pi
-// can call it with the same client/client credentials it already uses for
-// GET /api/v1/board/today.
+// handleBoardButton locks all registered devices from a physical button press
+// on the board. It always locks (a long press unlocks via /api/v1/unlock
+// instead), so the button never needs to know the current state. It uses the
+// client role so the board can call it with the same client/client credentials
+// as the rest of the client API.
 func (a *App) handleBoardButton(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -43,14 +44,14 @@ func (a *App) handleBoardButton(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	locked, affected, err := a.store.ToggleAllLocks(r.Context(), boardButtonMessage, boardButtonWarningSeconds, a.now())
+	affected, err := a.store.LockAllLocks(r.Context(), boardButtonMessage, boardButtonWarningSeconds, a.now())
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "toggle locks failed")
+		writeAPIError(w, http.StatusInternalServerError, "lock all failed")
 		return
 	}
 	a.notifier.notify()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"locked":   locked,
+		"locked":   true,
 		"affected": affected,
 	})
 }

@@ -5,6 +5,7 @@ A screen-time tracking and enforcement system. It has three parts:
 - **`server/`** – A Go HTTP server that receives client events, stores them in SQLite, and serves an HTML admin UI for reports, settings, and lock/unlock commands.
 - **`client-windows/`** – A Windows client built as a single `rootaika.exe` that runs both a background service and a user-session agent (`rootaika.exe service` / `rootaika.exe agent`). It updates itself over the air from a public GitHub release.
 - **`client-waveshare/`** – A Raspberry Pi + Waveshare e-ink display that shows today's per-device screen-time totals, fetched from the server as JSON.
+- **`client-rp2040-button/`** – An RP2040 board with a physical button that locks (short press) or unlocks (long press) all devices via the server API.
 
 The client sends activity events to the server, polls for config and commands, and enforces screen locking.
 
@@ -108,7 +109,7 @@ go build -ldflags "-H=windowsgui -X rootaika/client-windows/internal/version.Ver
 
 ### Over-the-air updates
 
-The server declares a desired client version as a triple `(desired_client_version, client_artifact_name, client_sha256)`, either globally in settings or as a per-device override (test one machine first). The client reports its own version on the config poll (`client_version`); when the server's desired version differs, the service downloads the named asset from the fixed public repo `github.com/pre/rootaika`, verifies its SHA256, and launches `apply-update` to swap the file and restart, without rebooting Windows. A failed version is not retried for 30 minutes, so a bad release cannot spin.
+The server declares a desired client version as a triple `(version, artifact_name, sha256)`. Releases are registered once in the admin UI's *Versiot* section, then the deployed version is *selected* from that registry: globally in settings, or as a per-device override (test one machine first). The client reports its own version on the config poll (`client_version`); when the server's desired version differs, the service downloads the named asset from the fixed public repo `github.com/pre/rootaika`, verifies its SHA256, and launches `apply-update` to swap the file and restart, without rebooting Windows. A failed version is not retried for 30 minutes, so a bad release cannot spin.
 
 Publish a release from a Linux box with `gh` authenticated:
 

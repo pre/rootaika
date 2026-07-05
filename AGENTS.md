@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `rootaika` is a LAN screen-time tracking system for Windows gaming machines (target: 5-10 home PCs, scale is not a concern). A headless Windows client reports active usage to a Go HTTP server, which stores raw events in SQLite and renders an HTML admin/viewing UI plus a client API. The authoritative design and an "implementation vs. plan deviations" table live in `plans/ruutuaika-suunnitelma.html` (Finnish). Keep that deviations table updated when the implementation diverges from the plan.
 
-This is a monorepo with one directory per top-level component: `server/`, `client-windows/`, and `client-waveshare/` (a Raspberry Pi + Waveshare e-ink board that reads `GET /api/v1/board/today` and shows today's per-device totals). The plan, READMEs, and UI strings are in Finnish; code identifiers are English.
+This is a monorepo with one directory per top-level component: `server/`, `client-windows/`, `client-macos/`, `client-waveshare/` (a Raspberry Pi + Waveshare e-ink board that reads `GET /api/v1/board/today` and shows today's per-device totals), `client-wt32-sc01/`, and `client-rp2040-button/` (an RP2040 board with a physical lock/unlock button; formerly `server-rp2040`, a full server port retired in favor of the Go server). The plan, READMEs, and UI strings are in Finnish; code identifiers are English.
 
 ## Commands
 

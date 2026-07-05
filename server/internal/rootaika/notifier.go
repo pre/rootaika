@@ -42,7 +42,7 @@ func (n *configNotifier) notify() {
 // so the same effective config always yields the same value.
 func configVersion(config ClientConfig) string {
 	h := fnv.New64a()
-	fmt.Fprintf(h, "i=%d;u=%d;p=%d;g=%d;d=%t;l=%t;m=%q;w=%d;s=%q;",
+	fmt.Fprintf(h, "i=%d;u=%d;p=%d;g=%d;d=%t;l=%t;m=%q;w=%d;s=%q;v=%q,%q,%q;",
 		config.IdleThresholdSeconds,
 		config.UploadIntervalSeconds,
 		config.PollIntervalSeconds,
@@ -52,6 +52,9 @@ func configVersion(config ClientConfig) string {
 		config.LockMessage,
 		config.WarningSeconds,
 		config.WarningSoundVersion,
+		config.DesiredVersion,
+		config.ArtifactName,
+		config.SHA256,
 	)
 	for _, category := range config.Categories {
 		fmt.Fprintf(h, "c=%q,%q,%q;", category.MatchType, category.Pattern, category.Category)

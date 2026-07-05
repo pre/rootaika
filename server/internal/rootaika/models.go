@@ -40,6 +40,21 @@ type Device struct {
 	WarningSeconds     int
 	LastStatus         string
 	LastStatusAt       time.Time
+	// OTA update: the per-device version selection (nil = inherit the global
+	// selection) and the version the client last reported it is running.
+	SelectedVersionID   *int64
+	LastClientVersion   string
+	LastClientVersionAt time.Time
+}
+
+// ClientVersion is one registered, selectable client release: the OTA triple
+// the Windows client needs to download and verify a build. The download origin
+// (GitHub owner/repo) is fixed in the client binary, never server-controlled.
+type ClientVersion struct {
+	ID           int64
+	Version      string
+	ArtifactName string
+	SHA256       string
 }
 
 type ActivityEvent struct {
@@ -74,6 +89,11 @@ type ClientConfig struct {
 	WarningSeconds         int
 	WarningSoundVersion    string
 	Categories             []ProgramCategory
+	// OTA update directives resolved from the device/global version selection.
+	// All empty means no update is offered and the client keeps running.
+	DesiredVersion string
+	ArtifactName   string
+	SHA256         string
 }
 
 type Settings struct {
@@ -85,6 +105,10 @@ type Settings struct {
 	BoardRefreshSeconds    int
 	DebugMode              bool
 	DebugUnassignedClients bool
+	// SelectedVersionID is the global OTA version selection: the id of a
+	// client_versions row every device inherits unless it has its own selection.
+	// 0 = no version selected (no update offered).
+	SelectedVersionID int
 }
 
 type ProgramCategory struct {
