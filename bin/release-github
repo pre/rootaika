@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # One-command release entry point: drafts the GitHub release (generated notes,
-# pinned to HEAD) for review in the browser. Publishing the draft creates the
-# tag and triggers the build workflow. See README.md "Publishing a release".
+# pinned to HEAD) and dispatches the build workflow, which attaches the assets
+# to the draft. Review in the browser once the assets appear, then publish;
+# publishing creates the tag and locks the release (immutable releases).
+# See README.md "Publishing a release".
 #
 # Usage: bin/release-github v1.2.3
 set -euo pipefail

@@ -1,16 +1,24 @@
-# Runs when a release is published: `make github-release VERSION=vX.Y.Z` creates
-# a draft pinned to HEAD with generated notes, and pressing "Publish release"
-# creates the tag and fires this workflow. It builds the Windows client in the
-# pinned Go image (the same `make docker-build` works locally and produces a
-# bit-identical exe), then the rootaika-bot machine account attaches the assets
-# and appends the admin-UI triple to the notes. See plans/release-process-plan.html.
+# Builds the Windows client for a DRAFT release. `make github-release
+# VERSION=vX.Y.Z` creates a draft pinned to HEAD with generated notes and
+# dispatches this workflow, which builds rootaika.exe in the pinned Go image
+# (the same `make docker-build` works locally and produces a bit-identical
+# exe), attaches the assets to the draft and appends the admin-UI triple to
+# its notes. Publishing the reviewed draft creates the tag and locks the
+# release: the repo uses immutable releases, so assets cannot be added or
+# changed after publishing. See plans/release-process-plan.html.
 name: release
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the draft release (vX.Y.Z)
+        required: true
+      sha:
+        description: Commit the draft release is pinned to
+        required: true
 
-# The default GITHUB_TOKEN is read-only; asset upload uses the bot's PAT instead.
+# The default GITHUB_TOKEN is read-only; draft asset upload uses the bot's PAT.
 permissions:
   contents: read
 
@@ -18,15 +26,19 @@ jobs:
   build-and-attach:
     runs-on: ubuntu-latest
     env:
-      TAG: ${{ github.event.release.tag_name }}
+      TAG: ${{ inputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The draft has no tag yet; build exactly the commit it is pinned to.
+          ref: ${{ inputs.sha }}
       - run: make -C client-windows docker-test
       - run: make -C client-windows docker-build VERSION="$TAG"
-      - name: Attach assets and append the admin triple
+      - name: Attach assets to the draft and append the admin triple
         env:
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
         run: |
+          # gh resolves drafts by tag name (falls back to the release list).
           gh release upload "$TAG" \
             client-windows/dist/rootaika.exe \
             client-windows/dist/rootaika.exe.sha256 \

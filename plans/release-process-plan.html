@@ -174,7 +174,7 @@
         account so no personal credentials appear in CI. Builds on the OTA design
         in <span class="file">plans/auto-update-suunnitelma.html</span>.
       </p>
-      <p><span class="badge">Status</span>Implemented (build.sh, Makefile, release.yml, README). The bot PAT and the <code>RELEASE_BOT_TOKEN</code> secret are configured manually on GitHub.</p>
+      <p><span class="badge">Status</span>Implemented (build.sh, Makefile, release.yml, README). The bot PAT and the <code>RELEASE_BOT_TOKEN</code> secret are configured manually on GitHub. Revised 2026-07 for GitHub immutable releases: the build is dispatched at draft time and the assets are attached to the <em>draft</em>, because nothing can be uploaded after publishing.</p>
     </header>
 
     <section class="section" aria-label="Decisions">
@@ -239,19 +239,29 @@
           <tr>
             <td>Trigger</td>
             <td>
-              <code>release: published</code>. <code>make github-release VERSION=vX.Y.Z</code>
-              creates a <em>draft</em> release pinned to the current HEAD
-              (<code>--target</code>), with notes generated from conventional commits
-              since the previous <code>v*</code> tag (grouped Features / Fixes /
-              Tests / Chores / Other). Pressing <em>Publish release</em> in the
-              browser creates the tag and fires the workflow.
+              <code>workflow_dispatch</code>, invoked by the release script.
+              <code>make github-release VERSION=vX.Y.Z</code> creates a <em>draft</em>
+              release pinned to the current HEAD (<code>--target</code>), with notes
+              generated from conventional commits since the previous <code>v*</code>
+              tag (grouped Features / Fixes / Tests / Chores / Other), then
+              dispatches the build workflow with the tag and the pinned SHA. The
+              workflow attaches the assets to the draft; pressing
+              <em>Publish release</em> in the browser creates the tag and locks the
+              release.
             </td>
             <td>
-              The admin reviews and publishes; the tag still follows the OTA URL
-              scheme <code>releases/download/{tag}/rootaika.exe</code>. Pinning the
-              target commit at draft time keeps the notes and the tagged code in
-              sync even if main moves before publishing. A bare tag push does
-              nothing &mdash; one publishing path only.
+              The repo uses immutable releases: assets are locked at publish, so
+              they must be attached while the release is still a draft &mdash; and
+              draft creation fires no workflow events, hence the explicit dispatch.
+              The admin now reviews the complete package (notes, assets, triple)
+              before publishing. The tag still follows the OTA URL scheme
+              <code>releases/download/{tag}/rootaika.exe</code>; pinning the target
+              commit at draft time keeps the notes, the build, and the tagged code
+              in sync even if main moves before publishing. A bare tag push does
+              nothing &mdash; one publishing path only. (Originally
+              <code>release: published</code> with post-publish upload; that broke
+              when immutability was enabled: HTTP 422 &ldquo;Cannot upload assets
+              to an immutable release&rdquo;, see v0.0.3.)
             </td>
           </tr>
           <tr>
@@ -259,14 +269,14 @@
             <td>
               <code>rootaika.exe</code>, <code>rootaika.exe.sha256</code>,
               <code>install.ps1</code>; the workflow appends the version triple for
-              the admin UI to the release notes after the build (idempotent on
+              the admin UI to the draft notes after the build (idempotent on
               re-runs).
             </td>
             <td>
               Same asset set as the retired <span class="file">scripts/release.sh</span>;
               the <code>.sha256</code> file works with <code>sha256sum -c</code>. The
-              digest exists only after the build, so it cannot be part of the
-              reviewed draft notes.
+              digest exists only after the build; since the build runs against the
+              draft, the triple is part of the reviewed draft notes.
             </td>
           </tr>
           <tr>
@@ -376,10 +386,12 @@ jobs:
     <section class="section" aria-label="Day-to-day flow">
       <h2>Day-to-day release flow</h2>
 <pre><code>bin/release-github v1.3.0
-# open the printed draft link, review the notes, press "Publish release"
-# publishing creates the tag; Actions builds and attaches the assets and
-# appends the triple to the notes; paste it into the admin UI (Versiot)
-# and select the version for a test device first</code></pre>
+# the script drafts the release and dispatches the build; Actions attaches
+# the assets and the triple to the draft
+# open the printed draft link, WAIT for the assets to appear, review, press
+# "Publish release" -- publishing creates the tag and locks the release
+# paste the triple into the admin UI (Versiot) and select the version for
+# a test device first</code></pre>
       <h3>Independent verification of a published release</h3>
 <pre><code>git checkout v1.3.0
 make -C client-windows docker-build VERSION=v1.3.0
@@ -390,7 +402,7 @@ cat client-windows/dist/rootaika.exe.sha256   # must equal the release asset dig
       <h2>Verification of the implementation</h2>
       <ol>
         <li>Run <code>make docker-build VERSION=v0.0.1-test</code> twice locally &mdash; the SHA-256 must be identical (reproducibility).</li>
-        <li>Run <code>make github-release VERSION=v0.0.1-test</code>, publish the draft &mdash; the workflow attaches the assets and appends the triple; the locally rebuilt digest matches the asset. Delete the test release and tag afterwards.</li>
+        <li>Run <code>make github-release VERSION=v0.0.1-test</code> &mdash; the dispatched workflow attaches the assets and the triple to the draft; publish and check the locally rebuilt digest matches the asset. Note: with immutable releases a published test release can be deleted but its tag name can never be reused, so prefer verifying on the draft and deleting it unpublished.</li>
         <li>OTA end-to-end: register the triple, select it as a per-device override on one test machine, confirm the client updates.</li>
       </ol>
     </section>

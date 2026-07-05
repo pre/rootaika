@@ -113,13 +113,13 @@ The server declares a desired client version as a triple `(version, artifact_nam
 
 ### Publishing a release
 
-Create a draft release; the script generates release notes from the conventional commits since the previous tag (grouped into Features / Fixes / Tests / Chores / Other) and pins the release to the current HEAD:
+Create a draft release; the script generates release notes from the conventional commits since the previous tag (grouped into Features / Fixes / Tests / Chores / Other), pins the release to the current HEAD, and dispatches the build workflow:
 
 ```sh
 bin/release-github v1.2.3
 ```
 
-Open the printed link, review the notes, and press **Publish release**. Publishing creates the tag, which triggers GitHub Actions (`.github/workflows/release.yml`): it builds `rootaika.exe` inside the pinned Go image, attaches the exe, its `.sha256` file, and `install.ps1`, and appends the admin-UI triple to the notes. You author the release; the assets are built and uploaded by the `rootaika-bot` machine account (a collaborator with write access whose classic PAT, `public_repo` scope only, is the `RELEASE_BOT_TOKEN` Actions secret — the workflow's own `GITHUB_TOKEN` is read-only).
+GitHub Actions (`.github/workflows/release.yml`) builds `rootaika.exe` inside the pinned Go image and attaches the exe, its `.sha256` file, and `install.ps1` **to the draft**, appending the admin-UI triple to its notes. Open the printed link, wait for the assets to appear, review, and press **Publish release**. Publishing creates the tag and locks the release permanently: the repo uses immutable releases, so assets cannot be added or changed after publishing, and a published tag name can never be reused — a broken release is abandoned and superseded by the next version. You author the release; the assets are built and uploaded by the `rootaika-bot` machine account (a collaborator with write access whose classic PAT, `public_repo` scope only, is the `RELEASE_BOT_TOKEN` Actions secret — the workflow's own `GITHUB_TOKEN` is read-only).
 
 The build is reproducible: the same commit built in the same image yields a bit-identical exe, so anyone can verify a published release locally:
 
@@ -129,7 +129,7 @@ make -C client-windows docker-build VERSION=v1.2.3
 cat client-windows/dist/rootaika.exe.sha256   # must equal the release asset digest
 ```
 
-If Actions is unavailable, build and attach the assets by hand: `make -C client-windows docker-build VERSION=v1.2.3`, then `gh release upload v1.2.3 client-windows/dist/rootaika.exe client-windows/dist/rootaika.exe.sha256 client-windows/scripts/install.ps1`.
+If Actions is unavailable, build and attach the assets by hand **while the release is still a draft**: `make -C client-windows docker-build VERSION=v1.2.3`, then `gh release upload v1.2.3 client-windows/dist/rootaika.exe client-windows/dist/rootaika.exe.sha256 client-windows/scripts/install.ps1` — immutability makes uploads impossible after publishing.
 
 ### Install (PowerShell as administrator)
 

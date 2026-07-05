@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Creates a DRAFT GitHub release pinned to the current HEAD, with release notes
 # generated from conventional commits since the previous v* tag (grouped into
-# Features / Fixes / Tests / Chores / Other). Review the draft in the browser and
-# press "Publish release": publishing creates the tag, which triggers
-# .github/workflows/release.yml to build and attach the artifacts.
+# Features / Fixes / Tests / Chores / Other), then dispatches
+# .github/workflows/release.yml to build and attach the artifacts TO THE DRAFT.
+# Review the draft in the browser once the assets appear and press
+# "Publish release": publishing creates the tag and locks the release
+# (immutable releases: assets cannot be added or changed after publishing).
 #
 # Usage: scripts/github-release.sh <version-tag> [--dry-run]
 #        --dry-run prints the generated notes without touching GitHub.
@@ -72,13 +74,17 @@ URL="$(gh release create "$VERSION" \
   --title "$VERSION" \
   --notes "$NOTES")"
 
+gh workflow run release.yml --repo "$REPO" -f tag="$VERSION" -f sha="$HEAD_SHA"
+
 cat >&2 <<EOF
 
 Draft release created (invisible to others until published):
 
   $URL
 
-Review the notes, then press "Publish release" in the browser. Publishing
-creates tag $VERSION at $HEAD_SHA and triggers the build workflow, which
-attaches rootaika.exe (+ .sha256, install.ps1) and appends the admin triple.
+The build workflow was dispatched; it attaches rootaika.exe (+ .sha256,
+install.ps1) to the draft and appends the admin triple to its notes.
+WAIT for the assets to appear on the draft, review, then press
+"Publish release". Publishing creates tag $VERSION at $HEAD_SHA and locks
+the release permanently: assets cannot be changed after publishing.
 EOF
