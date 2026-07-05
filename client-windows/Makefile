@@ -1,13 +1,13 @@
 # Makefile — build, test, and release the rootaika Windows client.
 #
-# Thin wrappers over scripts/build.sh and scripts/release.sh so there is one
-# source of truth for the build flags. See README.md for the full workflow.
+# Thin wrappers over the scripts/ shell scripts so there is one source of truth
+# for the build flags. See README.md for the full workflow.
 #
 #   make build                 cross-compile dist/rootaika.exe (version "dev")
 #   make build VERSION=v1.2.0  cross-compile with a stamped version
 #   make docker-build VERSION=v1.2.0  same build inside the pinned Go image
 #   make docker-test           go test inside the pinned Go image
-#   make release VERSION=v1.2.0  build + publish a GitHub release (needs gh)
+#   make github-release VERSION=v1.2.3  draft a GitHub release with generated notes
 #   make test                  go test with race detector + coverage
 #   make                       same as build
 #   make clean                 remove dist/
@@ -20,19 +20,20 @@ SCRIPTS := scripts
 # sha256 can be verified independently. Bump together with go.mod's Go version.
 GO_IMAGE ?= golang:1.26.4-bookworm
 
-.PHONY: all build release test clean help
+.PHONY: all build github-release test clean help
 
 all: build
 
 build:
 	$(SCRIPTS)/build.sh "$(VERSION)"
 
-# release.sh requires a real version tag (it refuses without one); guard here so
-# `make release` without VERSION fails fast with a useful message.
-release:
+# Creates a DRAFT release with notes generated from git history; publishing it in
+# the browser creates the tag and triggers the build workflow. Guard VERSION so
+# the target fails fast with a useful message when it is missing.
+github-release:
 	@test "$(VERSION)" != "dev" || { \
-		echo "error: set a version, e.g. make release VERSION=v1.2.0" >&2; exit 2; }
-	$(SCRIPTS)/release.sh "$(VERSION)"
+		echo "error: set a version, e.g. make github-release VERSION=v1.2.3" >&2; exit 2; }
+	$(SCRIPTS)/github-release.sh "$(VERSION)"
 
 test:
 	go test -race -cover ./...
@@ -47,4 +48,4 @@ clean:
 	rm -rf dist
 
 help:
-	@sed -n '1,14p' $(MAKEFILE_LIST)
+	@sed -n '1,13p' $(MAKEFILE_LIST)

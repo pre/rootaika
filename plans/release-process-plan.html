@@ -167,11 +167,12 @@
       <h1>Release process: container build + GitHub Releases</h1>
       <p class="lead">
         Automate publishing the Windows client (<code>rootaika.exe</code>) and its
-        SHA-256 digest as a GitHub release. The build runs in a container that is
-        bit-for-bit identical in GitHub Actions and on a local machine, and the
-        release is published by a separate machine account instead of the personal
-        GitHub account. Builds on the OTA design in
-        <span class="file">plans/auto-update-suunnitelma.html</span>.
+        SHA-256 digest as a GitHub release. The admin drafts and publishes the
+        release (generated notes, reviewed in the browser); the build runs in a
+        container that is bit-for-bit identical in GitHub Actions and on a local
+        machine, and the artifacts are built and attached by a separate machine
+        account so no personal credentials appear in CI. Builds on the OTA design
+        in <span class="file">plans/auto-update-suunnitelma.html</span>.
       </p>
       <p><span class="badge">Status</span>Implemented (build.sh, Makefile, release.yml, README). The bot PAT and the <code>RELEASE_BOT_TOKEN</code> secret are configured manually on GitHub.</p>
     </header>
@@ -227,31 +228,45 @@
               <code>RELEASE_BOT_TOKEN</code> Actions secret.
             </td>
             <td>
-              Personal-account credentials never appear in CI, and releases show the
-              bot as author. The assets must still land in <code>pre/rootaika</code>
+              Personal-account credentials never appear in CI. The release itself is
+              authored and published by the admin (who creates the draft); the bot
+              only builds, attaches the assets, and appends the SHA-256 triple to
+              the notes. The assets must still land in <code>pre/rootaika</code>
               because the client pins owner/repo at compile time
               (<span class="file">client-windows/internal/version/version.go</span>).
             </td>
           </tr>
           <tr>
             <td>Trigger</td>
-            <td>Push of a tag matching <code>v*</code>.</td>
             <td>
-              Matches the OTA download URL scheme
-              <code>releases/download/{tag}/rootaika.exe</code> and the existing
-              manual flow.
+              <code>release: published</code>. <code>make github-release VERSION=vX.Y.Z</code>
+              creates a <em>draft</em> release pinned to the current HEAD
+              (<code>--target</code>), with notes generated from conventional commits
+              since the previous <code>v*</code> tag (grouped Features / Fixes /
+              Tests / Chores / Other). Pressing <em>Publish release</em> in the
+              browser creates the tag and fires the workflow.
+            </td>
+            <td>
+              The admin reviews and publishes; the tag still follows the OTA URL
+              scheme <code>releases/download/{tag}/rootaika.exe</code>. Pinning the
+              target commit at draft time keeps the notes and the tagged code in
+              sync even if main moves before publishing. A bare tag push does
+              nothing &mdash; one publishing path only.
             </td>
           </tr>
           <tr>
             <td>Release contents</td>
             <td>
               <code>rootaika.exe</code>, <code>rootaika.exe.sha256</code>,
-              <code>install.ps1</code>; release notes contain the version triple for
-              the admin UI.
+              <code>install.ps1</code>; the workflow appends the version triple for
+              the admin UI to the release notes after the build (idempotent on
+              re-runs).
             </td>
             <td>
-              Same asset set as the current <span class="file">scripts/release.sh</span>;
-              the <code>.sha256</code> file works with <code>sha256sum -c</code>.
+              Same asset set as the retired <span class="file">scripts/release.sh</span>;
+              the <code>.sha256</code> file works with <code>sha256sum -c</code>. The
+              digest exists only after the build, so it cannot be part of the
+              reviewed draft notes.
             </td>
           </tr>
           <tr>
@@ -320,10 +335,19 @@ jobs:
         </li>
         <li>
           <span class="file">README.md</span> &mdash; replace the
-          &ldquo;publish a release from a Linux box&rdquo; section with the tag-push
-          flow, the local verification recipe, and the one-time bot setup.
-          <span class="file">scripts/release.sh</span> stays unchanged as the manual
-          fallback.
+          &ldquo;publish a release from a Linux box&rdquo; section with the
+          draft-and-publish flow, the local verification recipe, and the one-time
+          bot setup. <span class="file">scripts/release.sh</span> is removed: a
+          release it published would now also fire the workflow, producing a
+          second, conflicting asset upload. Manual recovery is
+          <code>make docker-build</code> + <code>gh release upload</code>.
+        </li>
+        <li>
+          <span class="file">client-windows/scripts/github-release.sh</span> &mdash;
+          creates the draft release: generates the grouped notes from
+          <code>git log</code>, verifies HEAD is pushed and the tag is free, and
+          prints the draft URL. <code>--dry-run</code> prints the notes without
+          touching GitHub.
         </li>
       </ol>
     </section>
@@ -351,9 +375,11 @@ jobs:
 
     <section class="section" aria-label="Day-to-day flow">
       <h2>Day-to-day release flow</h2>
-<pre><code>git tag v1.3.0 &amp;&amp; git push origin v1.3.0
-# wait for the action, then paste the triple from the release notes
-# into the admin UI (Versiot) and select the version for a test device first</code></pre>
+<pre><code>make -C client-windows github-release VERSION=v1.3.0
+# open the printed draft link, review the notes, press "Publish release"
+# publishing creates the tag; Actions builds and attaches the assets and
+# appends the triple to the notes; paste it into the admin UI (Versiot)
+# and select the version for a test device first</code></pre>
       <h3>Independent verification of a published release</h3>
 <pre><code>git checkout v1.3.0
 make -C client-windows docker-build VERSION=v1.3.0
@@ -364,7 +390,7 @@ cat client-windows/dist/rootaika.exe.sha256   # must equal the release asset dig
       <h2>Verification of the implementation</h2>
       <ol>
         <li>Run <code>make docker-build VERSION=v0.0.1-test</code> twice locally &mdash; the SHA-256 must be identical (reproducibility).</li>
-        <li>Push tag <code>v0.0.1-test</code> &mdash; the workflow publishes a release authored by the bot; the locally rebuilt digest matches the asset. Delete the test release and tag afterwards.</li>
+        <li>Run <code>make github-release VERSION=v0.0.1-test</code>, publish the draft &mdash; the workflow attaches the assets and appends the triple; the locally rebuilt digest matches the asset. Delete the test release and tag afterwards.</li>
         <li>OTA end-to-end: register the triple, select it as a per-device override on one test machine, confirm the client updates.</li>
       </ol>
     </section>

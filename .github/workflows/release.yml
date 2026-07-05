@@ -1,33 +1,42 @@
-# Builds the Windows client in the pinned Go image (the same `make docker-build`
-# works locally, producing a bit-identical exe) and publishes a GitHub release
-# authored by the rootaika-bot machine account. See plans/release-process-plan.html.
+# Runs when a release is published: `make github-release VERSION=vX.Y.Z` creates
+# a draft pinned to HEAD with generated notes, and pressing "Publish release"
+# creates the tag and fires this workflow. It builds the Windows client in the
+# pinned Go image (the same `make docker-build` works locally and produces a
+# bit-identical exe), then the rootaika-bot machine account attaches the assets
+# and appends the admin-UI triple to the notes. See plans/release-process-plan.html.
 name: release
 
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
 
-# The default GITHUB_TOKEN is read-only; publishing uses the bot's PAT instead.
+# The default GITHUB_TOKEN is read-only; asset upload uses the bot's PAT instead.
 permissions:
   contents: read
 
 jobs:
-  release:
+  build-and-attach:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v4
       - run: make -C client-windows docker-test
-      - run: make -C client-windows docker-build VERSION="$GITHUB_REF_NAME"
-      - name: Publish release
+      - run: make -C client-windows docker-build VERSION="$TAG"
+      - name: Attach assets and append the admin triple
         env:
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
         run: |
-          SHA256=$(cut -d' ' -f1 client-windows/dist/rootaika.exe.sha256)
-          NOTES=$(printf 'Paste into the admin UI (Versiot):\n\n    desired_client_version = %s\n    client_artifact_name   = rootaika.exe\n    client_sha256          = %s\n' "$GITHUB_REF_NAME" "$SHA256")
-          gh release create "$GITHUB_REF_NAME" \
+          gh release upload "$TAG" \
             client-windows/dist/rootaika.exe \
             client-windows/dist/rootaika.exe.sha256 \
             client-windows/scripts/install.ps1 \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --notes "$NOTES"
+            --repo "$GITHUB_REPOSITORY" --clobber
+          BODY=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          # Idempotent on workflow re-runs: append the triple only once.
+          if ! grep -q client_sha256 <<<"$BODY"; then
+            SHA256=$(cut -d' ' -f1 client-windows/dist/rootaika.exe.sha256)
+            TRIPLE=$(printf 'Paste into the admin UI (Versiot):\n\n    desired_client_version = %s\n    client_artifact_name   = rootaika.exe\n    client_sha256          = %s' "$TAG" "$SHA256")
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --notes "$(printf '%s\n\n%s\n' "$BODY" "$TRIPLE")"
+          fi

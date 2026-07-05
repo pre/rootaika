@@ -113,21 +113,23 @@ The server declares a desired client version as a triple `(version, artifact_nam
 
 ### Publishing a release
 
-Push a version tag; GitHub Actions (`.github/workflows/release.yml`) builds `rootaika.exe` inside the pinned Go image and publishes the release with the asset, its `.sha256` file, and `install.ps1`. The release notes contain the triple to paste into the admin UI.
+Create a draft release; the script generates release notes from the conventional commits since the previous tag (grouped into Features / Fixes / Tests / Chores / Other) and pins the release to the current HEAD:
 
 ```sh
-git tag v1.2.0 && git push origin v1.2.0
+make -C client-windows github-release VERSION=v1.2.3
 ```
+
+Open the printed link, review the notes, and press **Publish release**. Publishing creates the tag, which triggers GitHub Actions (`.github/workflows/release.yml`): it builds `rootaika.exe` inside the pinned Go image, attaches the exe, its `.sha256` file, and `install.ps1`, and appends the admin-UI triple to the notes. You author the release; the assets are built and uploaded by the `rootaika-bot` machine account (a collaborator with write access whose classic PAT, `public_repo` scope only, is the `RELEASE_BOT_TOKEN` Actions secret — the workflow's own `GITHUB_TOKEN` is read-only).
 
 The build is reproducible: the same commit built in the same image yields a bit-identical exe, so anyone can verify a published release locally:
 
 ```sh
-git checkout v1.2.0
-make -C client-windows docker-build VERSION=v1.2.0
+git checkout v1.2.3
+make -C client-windows docker-build VERSION=v1.2.3
 cat client-windows/dist/rootaika.exe.sha256   # must equal the release asset digest
 ```
 
-The release is authored by the `rootaika-bot` machine account: it is a collaborator with write access, and its PAT (classic, `public_repo` scope only) is stored as the `RELEASE_BOT_TOKEN` Actions secret. The workflow's own `GITHUB_TOKEN` is read-only. Manual fallback from any box with `gh` authenticated: `cd client-windows && scripts/release.sh v1.2.0`.
+If Actions is unavailable, build and attach the assets by hand: `make -C client-windows docker-build VERSION=v1.2.3`, then `gh release upload v1.2.3 client-windows/dist/rootaika.exe client-windows/dist/rootaika.exe.sha256 client-windows/scripts/install.ps1`.
 
 ### Install (PowerShell as administrator)
 
