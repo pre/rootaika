@@ -111,14 +111,23 @@ go build -ldflags "-H=windowsgui -X rootaika/client-windows/internal/version.Ver
 
 The server declares a desired client version as a triple `(version, artifact_name, sha256)`. Releases are registered once in the admin UI's *Versiot* section, then the deployed version is *selected* from that registry: globally in settings, or as a per-device override (test one machine first). The client reports its own version on the config poll (`client_version`); when the server's desired version differs, the service downloads the named asset from the fixed public repo `github.com/pre/rootaika`, verifies its SHA256, and launches `apply-update` to swap the file and restart, without rebooting Windows. A failed version is not retried for 30 minutes, so a bad release cannot spin.
 
-Publish a release from a Linux box with `gh` authenticated:
+### Publishing a release
+
+Push a version tag; GitHub Actions (`.github/workflows/release.yml`) builds `rootaika.exe` inside the pinned Go image and publishes the release with the asset, its `.sha256` file, and `install.ps1`. The release notes contain the triple to paste into the admin UI.
 
 ```sh
-cd client-windows
-scripts/release.sh v1.2.0
+git tag v1.2.0 && git push origin v1.2.0
 ```
 
-This cross-compiles `rootaika.exe`, creates the public GitHub release, and prints the triple to paste into the admin UI.
+The build is reproducible: the same commit built in the same image yields a bit-identical exe, so anyone can verify a published release locally:
+
+```sh
+git checkout v1.2.0
+make -C client-windows docker-build VERSION=v1.2.0
+cat client-windows/dist/rootaika.exe.sha256   # must equal the release asset digest
+```
+
+The release is authored by the `rootaika-bot` machine account: it is a collaborator with write access, and its PAT (classic, `public_repo` scope only) is stored as the `RELEASE_BOT_TOKEN` Actions secret. The workflow's own `GITHUB_TOKEN` is read-only. Manual fallback from any box with `gh` authenticated: `cd client-windows && scripts/release.sh v1.2.0`.
 
 ### Install (PowerShell as administrator)
 

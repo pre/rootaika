@@ -1,0 +1,33 @@
+# Builds the Windows client in the pinned Go image (the same `make docker-build`
+# works locally, producing a bit-identical exe) and publishes a GitHub release
+# authored by the rootaika-bot machine account. See plans/release-process-plan.html.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+# The default GITHUB_TOKEN is read-only; publishing uses the bot's PAT instead.
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -C client-windows docker-test
+      - run: make -C client-windows docker-build VERSION="$GITHUB_REF_NAME"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        run: |
+          SHA256=$(cut -d' ' -f1 client-windows/dist/rootaika.exe.sha256)
+          NOTES=$(printf 'Paste into the admin UI (Versiot):\n\n    desired_client_version = %s\n    client_artifact_name   = rootaika.exe\n    client_sha256          = %s\n' "$GITHUB_REF_NAME" "$SHA256")
+          gh release create "$GITHUB_REF_NAME" \
+            client-windows/dist/rootaika.exe \
+            client-windows/dist/rootaika.exe.sha256 \
+            client-windows/scripts/install.ps1 \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "$NOTES"

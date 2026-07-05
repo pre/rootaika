@@ -5,6 +5,8 @@
 #
 #   make build                 cross-compile dist/rootaika.exe (version "dev")
 #   make build VERSION=v1.2.0  cross-compile with a stamped version
+#   make docker-build VERSION=v1.2.0  same build inside the pinned Go image
+#   make docker-test           go test inside the pinned Go image
 #   make release VERSION=v1.2.0  build + publish a GitHub release (needs gh)
 #   make test                  go test with race detector + coverage
 #   make                       same as build
@@ -12,6 +14,11 @@
 
 VERSION ?= dev
 SCRIPTS := scripts
+
+# The pinned build image, shared with .github/workflows/release.yml: building at
+# a release tag with docker-build reproduces the released exe bit-for-bit, so its
+# sha256 can be verified independently. Bump together with go.mod's Go version.
+GO_IMAGE ?= golang:1.26.4-bookworm
 
 .PHONY: all build release test clean help
 
@@ -30,8 +37,14 @@ release:
 test:
 	go test -race -cover ./...
 
+# Run any target inside the pinned build image: make docker-build, docker-test...
+# The named volume caches Go modules between runs.
+docker-%:
+	docker run --rm -v "$(CURDIR)":/src -w /src -v rootaika-gomod:/go/pkg/mod \
+		$(GO_IMAGE) make $* VERSION="$(VERSION)"
+
 clean:
 	rm -rf dist
 
 help:
-	@sed -n '1,12p' $(MAKEFILE_LIST)
+	@sed -n '1,14p' $(MAKEFILE_LIST)
