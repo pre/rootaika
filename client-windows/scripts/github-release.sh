@@ -23,10 +23,15 @@ if [[ ! "$VERSION" =~ ^v[0-9] ]]; then
   exit 2
 fi
 
+# Publishing a draft creates the tag on GitHub only, so sync tags first or the
+# previous-tag lookup below misses them and the notes repeat older releases.
+git fetch -q --tags origin
+
 HEAD_SHA="$(git rev-parse HEAD)"
 PREV_TAG="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
 RANGE="${PREV_TAG:+$PREV_TAG..}HEAD"
 SUBJECTS="$(git log --no-merges --pretty='%s' "$RANGE")"
+[[ -n "$SUBJECTS" ]] || { echo "no new commits since ${PREV_TAG:-start}; nothing to release" >&2; exit 1; }
 
 NOTES=""
 section() { # append a "## title" section with subjects matching the prefix regex
@@ -51,7 +56,6 @@ fi
 command -v gh >/dev/null || { echo "gh CLI is required" >&2; exit 1; }
 
 # The draft is pinned to HEAD, so HEAD must exist on origin and the tag be free.
-git fetch -q origin
 if ! git merge-base --is-ancestor "$HEAD_SHA" origin/main; then
   echo "HEAD ($HEAD_SHA) is not on origin/main; push first." >&2
   exit 1
