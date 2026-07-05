@@ -28,7 +28,7 @@ jobs:
     env:
       TAG: ${{ inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # The draft has no tag yet; build exactly the commit it is pinned to.
           ref: ${{ inputs.sha }}
