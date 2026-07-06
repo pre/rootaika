@@ -8,15 +8,12 @@ actor Core {
     private let probe: ActivityProbing
     private let lock: LockControlling
     private let debug: DebugLogging
+    private let buffer: EventBuffer
     private var config: Config
 
     // Tracks the last debug-mode value applied to the console so it is shown the
     // moment the server enables debug and hidden when it disables it.
     private var lastDebugMode: Bool = false
-
-    // Buffered, unsent events (in-memory placeholder for the SQLite buffer).
-    private var pending: [Event] = []
-    private var nextSequence: Int64 = 1
 
     // Reporting state (shouldEmit / heartbeat logic).
     private var lastEvent: Event?
@@ -41,12 +38,13 @@ actor Core {
     // act only when the intent actually changes.
     private var lastLockSignature: String?
 
-    init(config: Config, board: BoardClienting, probe: ActivityProbing, lock: LockControlling, debug: DebugLogging) {
+    init(config: Config, board: BoardClienting, probe: ActivityProbing, lock: LockControlling, debug: DebugLogging, buffer: EventBuffer) {
         self.config = config
         self.board = board
         self.probe = probe
         self.lock = lock
         self.debug = debug
+        self.buffer = buffer
     }
 
     // MARK: Run loops
@@ -110,12 +108,19 @@ actor Core {
         if shouldEmit(last: lastEvent, current: event, lastSentAt: lastSentAt, now: now) {
             let stateChanged = (lastEvent?.state != event.state)
             let processChanged = (lastEvent?.processName != event.processName)
-            enqueue(event)
+            do {
+                try buffer.enqueue(event)
+            } catch {
+                // Keep lastEvent unchanged so the next tick retries the enqueue.
+                debug.log("enqueue failed: \(error)")
+                return
+            }
             lastEvent = event
             lastSentAt = now
             lastReportedStatus = state
             let reason = stateChanged ? "state-change" : (processChanged ? "process-change" : "heartbeat")
-            debug.log("queued event: state=\(state.rawValue) process=\(event.processName ?? "nil") reason=\(reason) pending=\(pending.count)")
+            let pendingCount = (try? buffer.countPending()) ?? -1
+            debug.log("queued event: state=\(state.rawValue) process=\(event.processName ?? "nil") reason=\(reason) pending=\(pendingCount)")
             // Report state/process transitions immediately rather than waiting
             // for the next upload interval; heartbeats ride the interval.
             if stateChanged || processChanged {
@@ -151,13 +156,6 @@ actor Core {
         return base.lowercased()
     }
 
-    private func enqueue(_ event: Event) {
-        var e = event
-        e.sequence = nextSequence
-        nextSequence += 1
-        pending.append(e)
-    }
-
     // MARK: Upload
 
     private func uploadLoop() async {
@@ -190,19 +188,27 @@ actor Core {
     func uploadOnce() async {
         let batchSize = config.batchSize > 0 ? config.batchSize : 100
         // Drain in batchSize chunks; stop on the first failure so the remaining
-        // events stay queued for the next cycle.
-        while !pending.isEmpty {
-            let slice = Array(pending.prefix(batchSize))
+        // events stay buffered for the next cycle.
+        while true {
+            let slice: [Event]
+            do {
+                slice = try buffer.pending(limit: batchSize)
+            } catch {
+                debug.log("read pending events failed: \(error)")
+                return
+            }
+            if slice.isEmpty { return }
             let batch = EventBatch(clientID: config.clientID, events: slice)
             do {
                 debug.log("upload: sending \(slice.count) event(s) to \(config.serverURL)/api/v1/events/batch")
                 let resp = try await board.postEvents(batch)
-                pending.removeFirst(slice.count) // mark-sent only after ack
-                debug.log("upload ok: accepted=\(resp.accepted) duplicate_or_ignored=\(resp.duplicateOrIgnored) device_id=\(resp.deviceID) remaining=\(pending.count)")
+                try buffer.markSent(slice.map { $0.eventID }) // mark-sent only after ack
+                let remaining = (try? buffer.countPending()) ?? -1
+                debug.log("upload ok: accepted=\(resp.accepted) duplicate_or_ignored=\(resp.duplicateOrIgnored) device_id=\(resp.deviceID) remaining=\(remaining)")
             } catch {
-                // Keep events queued; retry next cycle.
-                debug.log("upload failed: \(error) (keeping \(pending.count) event(s) queued)")
-                break
+                // Keep events buffered; retry next cycle.
+                debug.log("upload failed: \(error) (events stay buffered)")
+                return
             }
         }
     }

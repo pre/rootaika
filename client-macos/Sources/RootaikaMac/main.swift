@@ -127,6 +127,16 @@ func runAgent(_ opts: CLIOptions) -> Int32 {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory) // LSUIElement-style: no Dock icon / menu bar
 
+    let buffer: EventBuffer
+    do {
+        buffer = try EventBuffer(path: Config.defaultDBPath())
+    } catch {
+        // Fail hard like the Windows service: launchd restarts us, and running
+        // without the persistent buffer would silently lose events.
+        FileHandle.standardError.write(Data("failed to open event buffer: \(error)\n".utf8))
+        return 1
+    }
+
     let board = NetworkBoardClient(config: config)
     let probe = MacActivityProbe()
     let lock = MacLockController {
@@ -134,7 +144,7 @@ func runAgent(_ opts: CLIOptions) -> Int32 {
         NSApp.terminate(nil)
     }
     let debug = MacDebugConsole()
-    let core = Core(config: config, board: board, probe: probe, lock: lock, debug: debug)
+    let core = Core(config: config, board: board, probe: probe, lock: lock, debug: debug, buffer: buffer)
 
     Task.detached {
         await core.run()
