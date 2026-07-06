@@ -19,6 +19,7 @@ struct CLIOptions {
     var selftest = false
     var testLockSeconds: Int?
     var forceDebug = false
+    var printVersion = false
 }
 
 func parseArgs(_ args: [String]) -> CLIOptions {
@@ -35,6 +36,8 @@ func parseArgs(_ args: [String]) -> CLIOptions {
             if i + 1 < args.count { opts.testLockSeconds = Int(args[i + 1]); i += 1 }
         case "--debug":
             opts.forceDebug = true
+        case "--version":
+            opts.printVersion = true
         default:
             if !arg.hasPrefix("-") && opts.command == nil {
                 opts.command = arg
@@ -155,7 +158,10 @@ func runAgent(_ opts: CLIOptions) -> Int32 {
 let opts = parseArgs(CommandLine.arguments)
 
 let exitCode: Int32
-if opts.selftest {
+if opts.printVersion {
+    print(Version.current)
+    exitCode = 0
+} else if opts.selftest {
     exitCode = runSelftest()
 } else if let seconds = opts.testLockSeconds {
     exitCode = runTestLock(seconds: seconds)

@@ -3,9 +3,8 @@
 # release. Must run on macOS (SwiftPM cannot cross-compile) with `gh`
 # authenticated against github.com/pre/rootaika.
 #
-# macOS OTA auto-update does not exist yet; this just attaches the binary the
-# same way the Windows release attaches rootaika.exe. The version triple is
-# printed for when OTA lands.
+# The printed version triple is what the daemon's OTA needs: create a client
+# version row with it in the server admin UI and assign it to the mac devices.
 #
 # Usage: scripts/release.sh v1.2.0
 set -euo pipefail
@@ -37,10 +36,10 @@ gh release create "$VERSION" "$OUT" "$INSTALLER" \
 
 cat <<EOF
 
-Release published. (macOS OTA is not wired up yet; the triple below is for when
-it is.)
+Release published. To roll it out over the air, add a client version in the
+server admin UI with this triple and assign it to the mac devices:
 
-  desired_client_version = $VERSION
-  client_artifact_name   = $ASSET
-  client_sha256          = $SHA256
+  version  = $VERSION
+  artifact = $ASSET
+  sha256   = $SHA256
 EOF

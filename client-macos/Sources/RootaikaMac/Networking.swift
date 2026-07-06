@@ -74,6 +74,9 @@ final class NetworkBoardClient: BoardClienting {
         if let status = status, !status.isEmpty {
             query.append(URLQueryItem(name: "status", value: status))
         }
+        // Running build version; the server records it and uses it to decide
+        // whether to include OTA update directives in the response.
+        query.append(URLQueryItem(name: "client_version", value: Version.current))
         query.append(URLQueryItem(name: "wait", value: String(clampedWait)))
         if let version = knownVersion, !version.isEmpty {
             query.append(URLQueryItem(name: "config_version", value: version))

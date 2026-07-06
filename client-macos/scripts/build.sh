@@ -19,6 +19,13 @@ fi
 
 mkdir -p "$DIST"
 
+# Inject the version label into Version.swift for the build (the SwiftPM
+# equivalent of the Windows ldflags injection) and restore the source after.
+VERSION_FILE="$CLIENT_ROOT/Sources/RootaikaMac/Version.swift"
+cp "$VERSION_FILE" "$VERSION_FILE.orig"
+trap 'mv "$VERSION_FILE.orig" "$VERSION_FILE"' EXIT
+sed -i '' "s/static let current = \"dev\"/static let current = \"$VERSION\"/" "$VERSION_FILE"
+
 echo "Building $ASSET ($VERSION) release..." >&2
 (
   cd "$CLIENT_ROOT"

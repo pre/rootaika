@@ -112,6 +112,12 @@ struct ClientConfig: Codable, Equatable {
     /// Changes whenever the admin uploads/removes a sound, so the client knows to
     /// re-download. Decoded leniently so an older server omitting it is tolerated.
     var warningSoundVersion: String
+    /// OTA update directives (transient, never persisted to config.json): the
+    /// release tag, asset name and SHA256 the daemon should be running. All
+    /// empty means no update is desired.
+    var desiredVersion: String
+    var artifactName: String
+    var sha256: String
     var categories: [CategoryRule]
 
     enum CodingKeys: String, CodingKey {
@@ -126,6 +132,9 @@ struct ClientConfig: Codable, Equatable {
         case lockMessage = "lock_message"
         case warningSeconds = "warning_seconds"
         case warningSoundVersion = "warning_sound_version"
+        case desiredVersion = "desired_version"
+        case artifactName = "artifact_name"
+        case sha256
         case categories
     }
 
@@ -141,6 +150,9 @@ struct ClientConfig: Codable, Equatable {
         lockMessage: String,
         warningSeconds: Int,
         warningSoundVersion: String = "",
+        desiredVersion: String = "",
+        artifactName: String = "",
+        sha256: String = "",
         categories: [CategoryRule]
     ) {
         self.clientID = clientID
@@ -154,6 +166,9 @@ struct ClientConfig: Codable, Equatable {
         self.lockMessage = lockMessage
         self.warningSeconds = warningSeconds
         self.warningSoundVersion = warningSoundVersion
+        self.desiredVersion = desiredVersion
+        self.artifactName = artifactName
+        self.sha256 = sha256
         self.categories = categories
     }
 
@@ -172,6 +187,9 @@ struct ClientConfig: Codable, Equatable {
         lockMessage = try c.decode(String.self, forKey: .lockMessage)
         warningSeconds = try c.decode(Int.self, forKey: .warningSeconds)
         warningSoundVersion = try c.decodeIfPresent(String.self, forKey: .warningSoundVersion) ?? ""
+        desiredVersion = try c.decodeIfPresent(String.self, forKey: .desiredVersion) ?? ""
+        artifactName = try c.decodeIfPresent(String.self, forKey: .artifactName) ?? ""
+        sha256 = try c.decodeIfPresent(String.self, forKey: .sha256) ?? ""
         categories = try c.decodeIfPresent([CategoryRule].self, forKey: .categories) ?? []
     }
 }

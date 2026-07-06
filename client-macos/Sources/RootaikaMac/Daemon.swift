@@ -47,7 +47,7 @@ final class Daemon {
     func start() throws {
         setbuf(stdout, nil) // launchd log file: line-timely output
         let cfg = store.snapshot()
-        log("daemon started: server=\(cfg.serverURL) client_id=\(cfg.clientID) base=\(baseDir.path)")
+        log("daemon started: version=\(Version.current) server=\(cfg.serverURL) client_id=\(cfg.clientID) base=\(baseDir.path)")
 
         let server = try AgentHTTPServer(
             port: AgentIPC.port,
@@ -194,6 +194,53 @@ final class Daemon {
         await syncWarningSound(serverVersion: serverConfig.warningSoundVersion)
         let applied = store.snapshot()
         log("config applied: version=\(serverConfig.configVersion) locked=\(applied.locked) debug=\(applied.debugMode)")
+        // OTA update check. The desired-version triple is transient (never
+        // persisted), so it is read straight off the server response. A failure
+        // is logged and suppressed for a cooldown, so a bad release cannot
+        // wedge the device.
+        await maybeUpdate(serverConfig)
+    }
+
+    // MARK: OTA self-update
+
+    private func maybeUpdate(_ serverConfig: ClientConfig) async {
+        let plan = Updater.Plan(
+            version: serverConfig.desiredVersion,
+            artifact: serverConfig.artifactName,
+            sha256: serverConfig.sha256
+        )
+        guard Updater.needsUpdate(current: Version.current, plan: plan) else { return }
+        guard !store.updateOnCooldown(plan.version) else { return }
+
+        guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath() else {
+            log("self-update failed: cannot resolve own executable path")
+            return
+        }
+        let staged = executable.deletingLastPathComponent()
+            .appendingPathComponent(executable.lastPathComponent + ".update", isDirectory: false)
+
+        log("self-update: downloading \(plan.version) (\(plan.artifact))")
+        do {
+            try await Updater.download(plan: plan, to: staged)
+            try Updater.apply(staged: staged, target: executable)
+        } catch {
+            store.recordFailedUpdate(plan.version)
+            log("self-update failed: \(error)")
+            return
+        }
+        log("self-update applied: \(plan.version), restarting daemon and agent")
+        restartOnNewBinary(processName: executable.lastPathComponent)
+    }
+
+    /// Kill every process running the (old inode of the) client binary — the
+    /// user-session agents and this daemon included — so launchd's KeepAlive
+    /// relaunches everything on the just-installed version.
+    private func restartOnNewBinary(processName: String) -> Never {
+        let pkill = Process()
+        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkill.arguments = ["-x", processName]
+        try? pkill.run() // do not wait: pkill may take us down first
+        exit(0)
     }
 
     private func syncWarningSound(serverVersion: String) async {
@@ -282,11 +329,17 @@ final class Daemon {
 /// async loops (the Windows client's stateStore, in Swift). Persists the config
 /// to disk whenever an update reports a change.
 final class DaemonStateStore {
+    /// How long a desired version that failed to download/apply is skipped
+    /// before retrying, so a broken release does not spin on every poll.
+    static let updateRetryCooldown: TimeInterval = 30 * 60
+
     private let lock = NSLock()
     private let path: URL
     private var current: Config
     private var lastReported: String?
     private var configVersion: String?
+    private var failedUpdate: String?
+    private var failedUpdateTime: Date?
 
     init(path: URL, config: Config) {
         self.path = path
@@ -321,6 +374,22 @@ final class DaemonStateStore {
         lock.lock()
         defer { lock.unlock() }
         return configVersion
+    }
+
+    func recordFailedUpdate(_ version: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        failedUpdate = version
+        failedUpdateTime = Date()
+    }
+
+    /// Whether the given version recently failed and is still in the retry
+    /// cooldown window. A different version always clears the guard.
+    func updateOnCooldown(_ version: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedUpdate == version, let failedAt = failedUpdateTime else { return false }
+        return Date().timeIntervalSince(failedAt) < DaemonStateStore.updateRetryCooldown
     }
 
     /// Apply a mutation; persist when it reports a change.
