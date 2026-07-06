@@ -37,6 +37,9 @@ Windows-specific syscall wrappers (`*_windows.go`) do not compile/run under Linu
 - **State-change reporting:** the agent compares against the previous observation and sends immediately on change, otherwise at heartbeat intervals.
 - **Resilience:** events are marked sent only after a successful upload; HTTP calls (`internal/api`) retry transient failures (network, 5xx, 429) with exponential backoff (~4 tries, 0.5s→5s), never 4xx. This bridges server restarts in seconds.
 
+### macOS client (`client-macos`) — Swift, one binary, two roles
+- Mirrors the Windows architecture: `rootaika-mac daemon` (root LaunchDaemon: config + SQLite buffer under `/Library/Application Support/rootaika`, upload/poll loops, OTA, watchdog that re-bootstraps the agent) and `rootaika-mac agent` (per-user LaunchAgent from a root-owned plist: idle/frontmost probing + lock overlay). Same loopback IPC contract as Windows (`127.0.0.1:48611`, `X-Rootaika-Agent-Token`), same event/retry semantics. SwiftPM, no third-party deps (SQLite via system libsqlite3). Lock overlay, kiosk enforcement and OTA binary swap need manual verification on a real Mac.
+
 ### e-ink board (`client-waveshare`) — Python
 - **Hardware:** Raspberry Pi Zero W 1.1 + Waveshare 4.2" e-Paper Module (400x300, Rev 2.1, black/white). The panel speaks SPI over 8 wires; VCC must be 3.3 V (not 5 V). Driver is `epd4in2_V2`. Wiring table and pinout link live in `client-waveshare/README.md`.
 - **`board_display.py`** polls `GET /api/v1/board/today` (client role) and draws today's per-device minutes with Pillow onto the e-ink panel. Refresh interval comes from the server (`board_refresh_seconds` setting) inside the JSON payload, so the Pi has no local interval config. Falls back to a 60 s retry and an offline screen when the server is unreachable.
