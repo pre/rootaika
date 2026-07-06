@@ -34,11 +34,11 @@ actor Core {
     // Lock / warning state.
     private var warned: Bool = false
     private var warningTask: Task<Void, Never>?
-    // Last lock intent already applied. The RP2040 server short-polls (answers
-    // every poll immediately, ignoring wait=), so applyConfig runs ~once a second
-    // with an unchanged lock state. Without this guard each poll would relaunch
-    // the warning countdown (restarting the sound) and rebuild the lock windows
-    // (green flicker). We act only when the intent actually changes.
+    // Last lock intent already applied. Every long-poll return (config change or
+    // wait budget elapsed) re-runs applyConfig with a usually-unchanged lock
+    // state. Without this guard each poll would relaunch the warning countdown
+    // (restarting the sound) and rebuild the lock windows (green flicker). We
+    // act only when the intent actually changes.
     private var lastLockSignature: String?
 
     init(config: Config, board: BoardClienting, probe: ActivityProbing, lock: LockControlling, debug: DebugLogging) {

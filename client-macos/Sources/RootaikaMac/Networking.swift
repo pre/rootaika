@@ -35,11 +35,6 @@ final class NetworkBoardClient: BoardClienting {
         sessionConfig.timeoutIntervalForRequest = 90
         sessionConfig.timeoutIntervalForResource = 120
         sessionConfig.httpAdditionalHeaders = ["Accept": "application/json"]
-        // The board server runs on an ESP-AT WiFi co-processor with only 5
-        // simultaneous TCP links total. URLSession defaults to up to 6 parallel
-        // connections per host, which exhausts and wedges that pool. Force a
-        // single connection so all requests are serialized over one link.
-        sessionConfig.httpMaximumConnectionsPerHost = 1
         self.session = URLSession(configuration: sessionConfig)
     }
 
@@ -81,7 +76,7 @@ final class NetworkBoardClient: BoardClienting {
         }
         query.append(URLQueryItem(name: "wait", value: String(clampedWait)))
         if let version = knownVersion, !version.isEmpty {
-            query.append(URLQueryItem(name: "version", value: version))
+            query.append(URLQueryItem(name: "config_version", value: version))
         }
 
         let url = try makeURL(path: "/api/v1/client/config", queryItems: query)
