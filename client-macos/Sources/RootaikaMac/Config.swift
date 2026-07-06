@@ -88,15 +88,13 @@ struct Config: Codable, Equatable {
         defaultBaseDir().appendingPathComponent("config.json", isDirectory: false)
     }
 
-    static func defaultDBPath() -> URL {
-        defaultBaseDir().appendingPathComponent("rootaika-client.db", isDirectory: false)
-    }
-
-    /// Local path of the cached warning MP3, alongside config.json. The agent
-    /// passes this to the lock controller so it can loop the sound during the
-    /// pre-lock countdown.
-    func warningSoundPath() -> URL {
-        Config.defaultBaseDir().appendingPathComponent("warning-sound.mp3", isDirectory: false)
+    /// Base dir for the root daemon's config/db/sound/token. ROOTAIKA_HOME
+    /// overrides it (shared with defaultBaseDir) so dev runs work without root.
+    static func daemonBaseDir() -> URL {
+        if let home = ProcessInfo.processInfo.environment["ROOTAIKA_HOME"], !home.isEmpty {
+            return URL(fileURLWithPath: home, isDirectory: true)
+        }
+        return URL(fileURLWithPath: "/Library/Application Support/rootaika", isDirectory: true)
     }
 
     // MARK: Load / Save

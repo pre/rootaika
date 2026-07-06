@@ -1,139 +1,121 @@
 import Foundation
 
-/// The agent loop: observe -> state machine -> buffer/report -> long-poll config
-/// -> apply lock state (warning countdown + overlay). Depends ONLY on the
-/// protocols; concrete implementations are injected via init.
+/// The user-session agent loop, mirroring the Windows rootaika-agent: each
+/// observe tick it pulls lock/config state from the local daemon, drives the
+/// lock overlay and pre-lock warning, samples activity, and reports events to
+/// the daemon (which buffers and uploads them). The agent holds no server
+/// credentials and no persistent state of its own.
 actor Core {
-    private let board: BoardClienting
+    private let daemon: DaemonClient
     private let probe: ActivityProbing
     private let lock: LockControlling
     private let debug: DebugLogging
-    private let buffer: EventBuffer
-    private var config: Config
+    /// --debug CLI flag: keeps the console visible regardless of daemon state.
+    private let forceDebug: Bool
 
-    // Tracks the last debug-mode value applied to the console so it is shown the
-    // moment the server enables debug and hidden when it disables it.
-    private var lastDebugMode: Bool = false
+    /// Latest state from the daemon; fallback defaults until first contact.
+    private var state = AgentState.fallback
+
+    // Tracks the last debug-mode value applied to the console so it is shown
+    // the moment the server enables debug and hidden when it disables it.
+    private var lastDebugMode: Bool?
 
     // Reporting state (shouldEmit / heartbeat logic).
     private var lastEvent: Event?
     private var lastSentAt: Date?
     private let heartbeat: TimeInterval = 60
 
-    // Long-poll state.
-    private var lastConfigVersion: String?
-    private var lastReportedStatus: ActivityState?
-
-    // Immediate-upload signalling: when a state/process change is observed we
-    // wake the upload loop instead of waiting for the next interval tick.
-    private var uploadWakeup: CheckedContinuation<Void, Never>?
-
     // Lock / warning state.
     private var warned: Bool = false
     private var warningTask: Task<Void, Never>?
-    // Last lock intent already applied. Every long-poll return (config change or
-    // wait budget elapsed) re-runs applyConfig with a usually-unchanged lock
-    // state. Without this guard each poll would relaunch the warning countdown
-    // (restarting the sound) and rebuild the lock windows (green flicker). We
-    // act only when the intent actually changes.
+    // Last lock intent already applied. The daemon state is re-fetched every
+    // observe tick with a usually-unchanged lock state; without this guard each
+    // tick would relaunch the warning countdown (restarting the sound) and
+    // rebuild the lock windows (green flicker). We act only when the intent
+    // actually changes. The warned flag is part of the signature so that a
+    // warning -> lock transition we drove ourselves is not seen as "new".
     private var lastLockSignature: String?
 
-    init(config: Config, board: BoardClienting, probe: ActivityProbing, lock: LockControlling, debug: DebugLogging, buffer: EventBuffer) {
-        self.config = config
-        self.board = board
+    init(daemon: DaemonClient, probe: ActivityProbing, lock: LockControlling, debug: DebugLogging, forceDebug: Bool) {
+        self.daemon = daemon
         self.probe = probe
         self.lock = lock
         self.debug = debug
-        self.buffer = buffer
+        self.forceDebug = forceDebug
     }
 
-    // MARK: Run loops
+    private var effectiveDebug: Bool {
+        state.debugMode || forceDebug
+    }
 
-    /// Start the three concurrent loops (observe, upload, poll) and block until cancelled.
+    // MARK: Run loop
+
+    /// One loop, one tick cadence — matches the Windows agent's single loop.
     func run() async {
-        lastDebugMode = config.debugMode
-        debug.setVisible(config.debugMode)
-        debug.log("agent started: server=\(config.serverURL) client_id=\(config.clientID) debug=\(config.debugMode)")
-        debug.log("config: observe=\(config.observeIntervalSeconds)s idle_threshold=\(config.idleThresholdSeconds)s upload=\(config.uploadIntervalSeconds)s poll_wait=\(config.pollWaitSeconds)s")
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.observeLoop() }
-            group.addTask { await self.uploadLoop() }
-            group.addTask { await self.pollLoop() }
-            await group.waitForAll()
-        }
-    }
-
-    // MARK: Observe + state machine
-
-    private func observeLoop() async {
+        debug.setVisible(forceDebug)
+        debug.log("agent started: daemon=\(AgentIPC.baseURL) forced_debug=\(forceDebug)")
         while !Task.isCancelled {
-            let interval = config.observeIntervalSeconds > 0 ? config.observeIntervalSeconds : 5
-            tick()
+            await tickOnce()
+            let interval = state.observeIntervalSeconds > 0 ? state.observeIntervalSeconds : 5
             try? await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
         }
     }
 
-    /// One observe tick: sample, derive state, build event, emit if needed.
-    func tick() {
+    func tickOnce() async {
+        // 1. Pull lock/config state from the daemon. On failure keep driving
+        //    with the last known state (matches the Windows agent).
+        do {
+            state = try await daemon.fetchState()
+            debug.log("state from daemon: locked=\(state.locked) warning=\(state.lockWarningSeconds)s idle_threshold=\(state.idleThresholdSeconds)s observe=\(state.observeIntervalSeconds)s debug=\(state.debugMode)")
+        } catch {
+            debug.log("fetch daemon state failed: \(error)")
+        }
+
+        // 2. Console visibility follows debug mode.
+        if lastDebugMode != effectiveDebug {
+            lastDebugMode = effectiveDebug
+            debug.setVisible(effectiveDebug)
+        }
+
+        // 3. Drive the lock overlay / warning countdown.
+        applyLockState(locked: state.locked, message: state.lockMessage, warningSeconds: state.lockWarningSeconds)
+
+        // 4. Observe and report.
         let idle = probe.idleSeconds()
         let foreground = probe.frontmostProcessName()
+        // The actual overlay state, which lags state.locked while a warning
+        // countdown runs: the playable grace period still counts as usage.
         let screenLocked = lock.isShowing
+        let threshold = state.idleThresholdSeconds > 0 ? state.idleThresholdSeconds : 60
 
-        let threshold = config.idleThresholdSeconds > 0 ? config.idleThresholdSeconds : 60
-
-        let state: ActivityState
-        var processName: String?
+        let activityState: ActivityState
         if screenLocked {
-            state = .locked
-            processName = nil
+            activityState = .locked
         } else if idle >= Double(threshold) {
-            state = .idle
-            processName = nil
+            activityState = .idle
         } else {
-            state = .active
-            processName = Core.normalizeProcessName(foreground)
+            activityState = .active
         }
 
         let now = Date()
         let event = Event(
             eventID: UUID().uuidString,
             occurredAt: now,
-            state: state,
-            processName: state == .active ? processName : nil,
-            sequence: 0
+            state: activityState,
+            processName: activityState == .active ? Core.normalizeProcessName(foreground) : nil
         )
-
-        debug.log("observe: idle=\(String(format: "%.1f", idle))s frontmost=\(foreground ?? "nil") -> state=\(state.rawValue) process=\(event.processName ?? "nil")")
+        debug.log("observe: idle=\(String(format: "%.1f", idle))s frontmost=\(foreground ?? "nil") -> state=\(activityState.rawValue) process=\(event.processName ?? "nil")")
 
         if shouldEmit(last: lastEvent, current: event, lastSentAt: lastSentAt, now: now) {
-            let stateChanged = (lastEvent?.state != event.state)
-            let processChanged = (lastEvent?.processName != event.processName)
             do {
-                try buffer.enqueue(event)
+                try await daemon.postEvent(event)
+                lastEvent = event
+                lastSentAt = now
+                debug.log("sent event to daemon: state=\(activityState.rawValue) process=\(event.processName ?? "nil")")
             } catch {
-                // Keep lastEvent unchanged so the next tick retries the enqueue.
-                debug.log("enqueue failed: \(error)")
-                return
+                // Keep lastEvent unchanged so the next tick retries.
+                debug.log("post event to daemon failed: \(error)")
             }
-            lastEvent = event
-            lastSentAt = now
-            lastReportedStatus = state
-            let reason = stateChanged ? "state-change" : (processChanged ? "process-change" : "heartbeat")
-            let pendingCount = (try? buffer.countPending()) ?? -1
-            debug.log("queued event: state=\(state.rawValue) process=\(event.processName ?? "nil") reason=\(reason) pending=\(pendingCount)")
-            // Report state/process transitions immediately rather than waiting
-            // for the next upload interval; heartbeats ride the interval.
-            if stateChanged || processChanged {
-                signalUpload()
-            }
-        }
-    }
-
-    /// Wake the upload loop so a freshly emitted transition is sent right away.
-    private func signalUpload() {
-        if let cont = uploadWakeup {
-            uploadWakeup = nil
-            cont.resume()
         }
     }
 
@@ -156,137 +138,10 @@ actor Core {
         return base.lowercased()
     }
 
-    // MARK: Upload
-
-    private func uploadLoop() async {
-        while !Task.isCancelled {
-            let interval = config.uploadIntervalSeconds > 0 ? config.uploadIntervalSeconds : 60
-            await uploadOnce()
-            await waitForUploadOrInterval(seconds: interval)
-        }
-    }
-
-    /// Sleep up to `seconds`, but return early if `signalUpload()` is called.
-    private func waitForUploadOrInterval(seconds: Int) async {
-        let timer = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(max(1, seconds)) * 1_000_000_000)
-            await self?.signalUpload()
-        }
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            // If a signal is already pending (continuation slot occupied), resume
-            // the prior waiter first; only one waiter exists at a time here.
-            if uploadWakeup != nil {
-                let prev = uploadWakeup
-                uploadWakeup = nil
-                prev?.resume()
-            }
-            uploadWakeup = cont
-        }
-        timer.cancel()
-    }
-
-    func uploadOnce() async {
-        let batchSize = config.batchSize > 0 ? config.batchSize : 100
-        // Drain in batchSize chunks; stop on the first failure so the remaining
-        // events stay buffered for the next cycle.
-        while true {
-            let slice: [Event]
-            do {
-                slice = try buffer.pending(limit: batchSize)
-            } catch {
-                debug.log("read pending events failed: \(error)")
-                return
-            }
-            if slice.isEmpty { return }
-            let batch = EventBatch(clientID: config.clientID, events: slice)
-            do {
-                debug.log("upload: sending \(slice.count) event(s) to \(config.serverURL)/api/v1/events/batch")
-                let resp = try await board.postEvents(batch)
-                try buffer.markSent(slice.map { $0.eventID }) // mark-sent only after ack
-                let remaining = (try? buffer.countPending()) ?? -1
-                debug.log("upload ok: accepted=\(resp.accepted) duplicate_or_ignored=\(resp.duplicateOrIgnored) device_id=\(resp.deviceID) remaining=\(remaining)")
-            } catch {
-                // Keep events buffered; retry next cycle.
-                debug.log("upload failed: \(error) (events stay buffered)")
-                return
-            }
-        }
-    }
-
-    // MARK: Long-poll config
-
-    private func pollLoop() async {
-        while !Task.isCancelled {
-            do {
-                let status = lastReportedStatus?.rawValue
-                debug.log("poll: GET /api/v1/client/config status=\(status ?? "nil") known_version=\(lastConfigVersion ?? "nil") wait=\(config.pollWaitSeconds)s")
-                let cfg = try await board.fetchConfig(
-                    clientID: config.clientID,
-                    status: status,
-                    knownVersion: lastConfigVersion,
-                    waitSeconds: config.pollWaitSeconds
-                )
-                await applyConfig(cfg)
-                debug.log("poll ok: version=\(cfg.configVersion) debug=\(cfg.debugMode) locked=\(cfg.locked) warning=\(cfg.warningSeconds)s idle_threshold=\(cfg.idleThresholdSeconds)s upload=\(cfg.uploadIntervalSeconds)s")
-                let gap = max(1, 0) // minPollGapSeconds floor
-                try? await Task.sleep(nanoseconds: UInt64(gap) * 1_000_000_000)
-            } catch {
-                debug.log("poll error: \(error)")
-                let backoff = config.pollIntervalSeconds > 0 ? config.pollIntervalSeconds : 30
-                try? await Task.sleep(nanoseconds: UInt64(backoff) * 1_000_000_000)
-            }
-        }
-    }
-
-    func applyConfig(_ cfg: ClientConfig) async {
-        lastConfigVersion = cfg.configVersion
-        _ = config.applyServerConfig(cfg)
-        // Show/hide the on-screen console the moment the server toggles debug mode.
-        if config.debugMode != lastDebugMode {
-            lastDebugMode = config.debugMode
-            debug.log("debug mode \(config.debugMode ? "enabled" : "disabled") by server")
-            debug.setVisible(config.debugMode)
-        }
-        await syncWarningSound(serverVersion: cfg.warningSoundVersion)
-        try? config.save()
-        applyLockState(locked: cfg.locked, message: cfg.lockMessage, warningSeconds: cfg.warningSeconds)
-    }
-
-    /// Reconcile the cached warning MP3 with the server's version so it is on
-    /// disk before a lock arrives. Best-effort: a download failure is ignored
-    /// (the prior cache stays) and only updates `config.warningSoundVersion`.
-    private func syncWarningSound(serverVersion: String) async {
-        do {
-            let result = try await WarningSound.sync(
-                downloader: board,
-                soundPath: config.warningSoundPath(),
-                cachedVersion: config.warningSoundVersion,
-                serverVersion: serverVersion
-            )
-            switch result {
-            case .unchanged:
-                break
-            case .cleared:
-                config.warningSoundVersion = ""
-                debug.log("warning sound: cleared (server has none)")
-            case .updated(let version):
-                config.warningSoundVersion = version
-                debug.log("warning sound: downloaded new version \(version)")
-            }
-        } catch {
-            debug.log("warning sound sync error: \(error)")
-        }
-    }
-
     // MARK: Lock state
 
     func applyLockState(locked: Bool, message: String, warningSeconds: Int) {
-        // Edge-trigger on the lock intent. The server short-polls, so this is
-        // called repeatedly with an identical state; only a real change should
-        // (re)drive the overlay, otherwise the sound restarts and the overlay
-        // flickers every poll. The warned flag is part of the signature so that
-        // a warning -> lock transition we drove ourselves is not seen as "new".
-        let signature = "\(locked)|\(warningSeconds)|\(warned)|\(config.debugMode)|\(message)"
+        let signature = "\(locked)|\(warningSeconds)|\(warned)|\(effectiveDebug)|\(message)"
         if signature == lastLockSignature {
             return
         }
@@ -308,7 +163,7 @@ actor Core {
             lock.showLock(
                 message: message,
                 warningSeconds: warningSeconds,
-                debugShutdownAllowed: config.debugMode
+                debugShutdownAllowed: effectiveDebug
             )
             return
         }
@@ -318,7 +173,7 @@ actor Core {
         // screen stays usable. Engage the lock overlay only once it elapses. The
         // sound plays ONLY here, never at the lock moment (matches Windows).
         if warningTask == nil {
-            let soundPath = WarningSound.cachedPath(config)
+            let soundPath = state.warningSoundPath
             warningTask = Task { [weak self] in
                 await self?.runWarningCountdown(
                     message: message,
@@ -355,20 +210,7 @@ actor Core {
         lock.showLock(
             message: message,
             warningSeconds: warningSeconds,
-            debugShutdownAllowed: config.debugMode
-        )
-    }
-
-    // MARK: Test helpers
-
-    /// Build a stubbed event (used by --selftest).
-    func buildStubEvent() -> Event {
-        Event(
-            eventID: UUID().uuidString,
-            occurredAt: Date(),
-            state: .active,
-            processName: "selftest",
-            sequence: 1
+            debugShutdownAllowed: effectiveDebug
         )
     }
 }

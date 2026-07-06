@@ -1,14 +1,20 @@
 import Foundation
 import AppKit
 
-// Entry point. Parses flags and dispatches to the requested mode.
-//   --selftest            : no GUI; exercise config load + JSON round-trip + stub event build; print OK; exit 0
+// Entry point. One binary, two long-lived roles (mirrors the Windows client's
+// service/agent subcommand dispatch):
+//   daemon                : root LaunchDaemon; config, SQLite buffer, upload +
+//                           config long-poll, agent endpoint, watchdog
+//   agent (default)       : user-session LaunchAgent; activity observation and
+//                           the lock overlay, talking to the daemon on loopback
+// plus dev helpers:
+//   --selftest            : no GUI; exercise config load + JSON round-trip; exit 0
 //   --test-lock <seconds> : show the lock overlay for N seconds, then exit
-//   --server <url>        : override server URL for this run
-//   --debug               : force debug mode on for this run (show the console immediately)
-//   (default)             : run the agent loop as an accessory (LSUIElement) app
+//   --server <url>        : override server URL (daemon only)
+//   --debug               : force debug mode on for this run
 
 struct CLIOptions {
+    var command: String?
     var serverOverride: String?
     var selftest = false
     var testLockSeconds: Int?
@@ -30,22 +36,13 @@ func parseArgs(_ args: [String]) -> CLIOptions {
         case "--debug":
             opts.forceDebug = true
         default:
-            break
+            if !arg.hasPrefix("-") && opts.command == nil {
+                opts.command = arg
+            }
         }
         i += 1
     }
     return opts
-}
-
-func loadConfig(_ opts: CLIOptions) throws -> Config {
-    var config = try Config.load()
-    if let server = opts.serverOverride, !server.isEmpty {
-        config.serverURL = server
-    }
-    if opts.forceDebug {
-        config.debugMode = true
-    }
-    return config
 }
 
 func runSelftest() -> Int32 {
@@ -91,6 +88,10 @@ func runSelftest() -> Int32 {
         let cfgData = try encoder.encode(cfg)
         _ = try decoder.decode(ClientConfig.self, from: cfgData)
 
+        // AgentState round-trip (daemon <-> agent IPC payload).
+        let stateData = try encoder.encode(AgentState.fallback)
+        _ = try decoder.decode(AgentState.self, from: stateData)
+
         print("OK")
         return 0
     } catch {
@@ -112,39 +113,34 @@ func runTestLock(seconds: Int) -> Int32 {
     return 0
 }
 
-func runAgent(_ opts: CLIOptions) -> Int32 {
-    let config: Config
+func runDaemon(_ opts: CLIOptions) -> Int32 {
+    let daemon: Daemon
     do {
-        config = try loadConfig(opts)
+        daemon = try Daemon(options: opts)
+        try daemon.start()
     } catch {
-        FileHandle.standardError.write(Data("failed to load config: \(error)\n".utf8))
+        FileHandle.standardError.write(Data("daemon startup failed: \(error)\n".utf8))
         return 1
     }
-    if DebugShutdownGate.shouldStayStopped(config: config) {
+    dispatchMain()
+}
+
+func runAgent(_ opts: CLIOptions) -> Int32 {
+    let daemonClient = DaemonClient()
+    if DebugShutdownGate.shouldStayStopped(daemon: daemonClient) {
         return 0
     }
 
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory) // LSUIElement-style: no Dock icon / menu bar
 
-    let buffer: EventBuffer
-    do {
-        buffer = try EventBuffer(path: Config.defaultDBPath())
-    } catch {
-        // Fail hard like the Windows service: launchd restarts us, and running
-        // without the persistent buffer would silently lose events.
-        FileHandle.standardError.write(Data("failed to open event buffer: \(error)\n".utf8))
-        return 1
-    }
-
-    let board = NetworkBoardClient(config: config)
     let probe = MacActivityProbe()
     let lock = MacLockController {
         DebugShutdownMarker.request()
         NSApp.terminate(nil)
     }
     let debug = MacDebugConsole()
-    let core = Core(config: config, board: board, probe: probe, lock: lock, debug: debug, buffer: buffer)
+    let core = Core(daemon: daemonClient, probe: probe, lock: lock, debug: debug, forceDebug: opts.forceDebug)
 
     Task.detached {
         await core.run()
@@ -163,6 +159,8 @@ if opts.selftest {
     exitCode = runSelftest()
 } else if let seconds = opts.testLockSeconds {
     exitCode = runTestLock(seconds: seconds)
+} else if opts.command == "daemon" {
+    exitCode = runDaemon(opts)
 } else {
     exitCode = runAgent(opts)
 }

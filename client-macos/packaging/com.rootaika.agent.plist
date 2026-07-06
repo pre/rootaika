@@ -4,29 +4,34 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.rootaika.macclient</string>
+    <string>com.rootaika.agent</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/rootaika-mac</string>
+        <string>agent</string>
     </array>
 
-    <!-- Start at login and re-launch if it exits (crash recovery / kid kills it). -->
+    <!-- User-session agent: activity observation + lock overlay. Installed in
+         /Library/LaunchAgents (root-owned) so it loads in every GUI session
+         and the user cannot edit it away; the root daemon's watchdog
+         re-bootstraps it if it is booted out. -->
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
 
-    <!-- Throttle relaunch storms. -->
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
     <key>ProcessType</key>
     <string>Interactive</string>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
 
     <key>StandardOutPath</key>
-    <string>/tmp/rootaika-mac.out.log</string>
+    <string>/tmp/rootaika-agent.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/rootaika-mac.err.log</string>
+    <string>/tmp/rootaika-agent.err.log</string>
 </dict>
 </plist>

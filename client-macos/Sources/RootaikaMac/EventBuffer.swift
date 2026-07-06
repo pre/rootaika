@@ -7,7 +7,8 @@ import SQLite3
 /// mark-sent-after-upload semantics so a crash or restart never loses unsent
 /// events.
 ///
-/// Not thread-safe by itself; all calls must come from a single actor (Core).
+/// Thread-safe: a mutex serializes all access, since the daemon enqueues from
+/// the agent-HTTP handler thread while the upload loop drains concurrently.
 final class EventBuffer {
     enum BufferError: Error, CustomStringConvertible {
         case sqlite(String)
@@ -22,6 +23,7 @@ final class EventBuffer {
     }
 
     private let db: OpaquePointer
+    private let mutex = NSLock()
     // sqlite3_bind_text destructor telling SQLite to copy the buffer.
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -72,6 +74,8 @@ final class EventBuffer {
     /// Returns the stored event (with event_id and sequence filled in).
     @discardableResult
     func enqueue(_ event: Event) throws -> Event {
+        mutex.lock()
+        defer { mutex.unlock() }
         var stored = event
         if stored.eventID.isEmpty {
             stored.eventID = UUID().uuidString
@@ -114,6 +118,8 @@ final class EventBuffer {
 
     /// Oldest-first unsent events, at most `limit`.
     func pending(limit: Int) throws -> [Event] {
+        mutex.lock()
+        defer { mutex.unlock() }
         let effectiveLimit = limit > 0 ? limit : 100
         let query = try prepare("""
             SELECT event_id, type, occurred_at_utc, state, process_name, sequence
@@ -150,6 +156,8 @@ final class EventBuffer {
     /// Stamp the given events as uploaded; they no longer appear in pending().
     func markSent(_ eventIDs: [String]) throws {
         guard !eventIDs.isEmpty else { return }
+        mutex.lock()
+        defer { mutex.unlock() }
         try exec("BEGIN IMMEDIATE")
         do {
             let update = try prepare("UPDATE events SET sent_at_utc = ? WHERE event_id = ?")
@@ -169,6 +177,8 @@ final class EventBuffer {
     }
 
     func countPending() throws -> Int {
+        mutex.lock()
+        defer { mutex.unlock() }
         let query = try prepare("SELECT COUNT(*) FROM events WHERE sent_at_utc IS NULL")
         defer { sqlite3_finalize(query) }
         guard sqlite3_step(query) == SQLITE_ROW else {

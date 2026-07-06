@@ -90,9 +90,4 @@ final class WarningSoundTests: XCTestCase {
         }
     }
 
-    func testCachedPathEmptyWhenNoVersion() {
-        var cfg = Config.makeDefault()
-        cfg.warningSoundVersion = ""
-        XCTAssertEqual(WarningSound.cachedPath(cfg), "")
-    }
 }

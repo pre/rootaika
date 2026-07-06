@@ -39,20 +39,6 @@ enum WarningSound {
         return .updated(version: serverVersion)
     }
 
-    /// Returns the cached MP3 path when a sound is present on disk, else "".
-    /// The agent reports this to the lock controller, so an absent file means
-    /// the warning plays silently.
-    static func cachedPath(_ cfg: Config) -> String {
-        if cfg.warningSoundVersion.isEmpty {
-            return ""
-        }
-        let path = cfg.warningSoundPath()
-        guard FileManager.default.fileExists(atPath: path.path) else {
-            return ""
-        }
-        return path.path
-    }
-
     /// Writes `data` to a temp file in the destination directory and renames it
     /// over the target, so a crash mid-write never leaves a truncated MP3.
     static func writeFileAtomic(_ path: URL, data: Data) throws {

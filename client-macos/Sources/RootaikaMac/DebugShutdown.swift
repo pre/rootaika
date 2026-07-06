@@ -1,9 +1,5 @@
 import Foundation
 
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
-
 enum DebugShutdownMarker {
     static func path() -> URL {
         Config.defaultBaseDir().appendingPathComponent("debug-shutdown-requested", isDirectory: false)
@@ -34,52 +30,32 @@ enum DebugShutdownMarker {
     }
 }
 
+/// After a debug shutdown, launchd's KeepAlive relaunches the agent every
+/// ThrottleInterval. This gate makes each relaunch exit immediately while the
+/// daemon still reports locked debug mode (the admin is debugging), and clears
+/// the marker once the state changed so the agent resumes. The daemon is asked
+/// instead of the server: it owns the config now. Unreachable daemon + marker
+/// means stay stopped, matching the old server-based behavior.
 enum DebugShutdownGate {
-    static func shouldStayStopped(config: Config) -> Bool {
+    static func shouldStayStopped(daemon: DaemonClient) -> Bool {
         guard DebugShutdownMarker.exists() else { return false }
-        guard let serverConfig = fetchServerConfig(config: config) else { return true }
-        if !serverConfig.locked || !serverConfig.debugMode {
+        guard let state = fetchState(daemon: daemon) else { return true }
+        if !state.locked || !state.debugMode {
             DebugShutdownMarker.clear()
             return false
         }
         return true
     }
 
-    private static func fetchServerConfig(config: Config) -> ClientConfig? {
-        let base = config.serverURL.hasSuffix("/")
-            ? String(config.serverURL.dropLast())
-            : config.serverURL
-        guard var components = URLComponents(string: base + "/api/v1/client/config") else {
-            return nil
-        }
-        components.queryItems = [
-            URLQueryItem(name: "client_id", value: config.clientID),
-            URLQueryItem(name: "wait", value: "0")
-        ]
-        guard let url = components.url else { return nil }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 5
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let auth = "\(config.clientUser):\(config.clientPassword)"
-        request.setValue("Basic \(Data(auth.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
-
+    /// Sync bridge for the async daemon call; main.swift dispatch is synchronous.
+    private static func fetchState(daemon: DaemonClient) -> AgentState? {
         let semaphore = DispatchSemaphore(value: 0)
-        let result = LockedBox<ClientConfig?>(nil)
-        let task = URLSession.shared.dataTask(with: request) { data, response, _ in
-            defer { semaphore.signal() }
-            guard let http = response as? HTTPURLResponse,
-                  (200...299).contains(http.statusCode),
-                  let data = data else {
-                result.set(nil)
-                return
-            }
-            result.set(try? RootaikaJSON.makeDecoder().decode(ClientConfig.self, from: data))
+        let result = LockedBox<AgentState?>(nil)
+        Task.detached {
+            result.set(try? await daemon.fetchState())
+            semaphore.signal()
         }
-        task.resume()
         if semaphore.wait(timeout: .now() + 6) == .timedOut {
-            task.cancel()
             return nil
         }
         return result.get()
