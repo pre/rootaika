@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rootaika - Memory-leak review: client-windows + client-macos</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --text: #1f2933;
+      --muted: #5b6673;
+      --border: #d8dee6;
+      --accent: #0f766e;
+      --accent-soft: #e6f4f1;
+      --warn: #8a5a00;
+      --warn-soft: #fff5d6;
+      --code: #f0f3f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+    main { max-width: 1040px; margin: 0 auto; padding: 48px 24px 72px; }
+    h1 { margin: 0 0 12px; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.05; }
+    h2 { margin: 40px 0 14px; font-size: 1.45rem; line-height: 1.25; }
+    h3 { margin: 22px 0 8px; font-size: 1.08rem; }
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); }
+    code {
+      background: var(--code);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.9em;
+    }
+    pre {
+      background: var(--code);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      overflow-x: auto;
+    }
+    pre code { background: none; padding: 0; }
+    section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+    }
+    .finding { border-left: 4px solid var(--warn); }
+    .clean { border-left: 4px solid var(--accent); }
+    .badge {
+      display: inline-block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      vertical-align: middle;
+    }
+    .badge.fix { background: var(--warn-soft); color: var(--warn); }
+    .badge.nit { background: var(--accent-soft); color: var(--accent); }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+    th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 0.92rem; }
+    th { background: var(--code); }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Memory-leak review: client-windows + client-macos</h1>
+    <p class="muted">Reviewed 2026-07-07. Scope: do any objects/resources stay alive or accumulate
+    when the client processes run for weeks or months? All long-lived components were read in full:
+    loops, timers, process lifecycles, HTTP clients, SQLite usage, AppKit windows, closures.</p>
+    <p><strong>Verdict:</strong> no true runtime memory leaks in either client. Two genuine
+    unbounded-growth issues were found (one in both clients, one macOS-only), plus small bounded nits.</p>
+  </header>
+
+  <section class="finding">
+    <h2>Finding 1 <span class="badge fix">FIX</span> Sent events are never purged from the local SQLite buffer (both clients)</h2>
+    <p>
+      <code>MarkSent</code> / <code>markSent</code> stamps rows with <code>sent_at_utc</code>, but
+      nothing ever deletes them &mdash; there is no <code>DELETE</code> anywhere in either buffer:
+    </p>
+    <ul>
+      <li><code>client-windows/internal/buffer/buffer.go</code> (<code>MarkSent</code>, line ~111)</li>
+      <li><code>client-macos/Sources/RootaikaMac/EventBuffer.swift</code> (<code>markSent</code>, line ~157)</li>
+    </ul>
+    <p>
+      The heartbeat produces at least ~1,440 events/day (more during active use), so the database
+      file and the <code>idx_events_unsent</code> index grow without bound for the device's lifetime.
+      Growth is slow (megabytes per month) but it is the one place where objects live forever on a
+      long-running client.
+    </p>
+    <h3>Fix (one statement per client)</h3>
+    <p>After a successful <code>markSent</code> (or on open), purge old sent rows:</p>
+    <pre><code>DELETE FROM events
+WHERE sent_at_utc IS NOT NULL
+  AND sent_at_utc &lt; &lt;now - 7 days&gt;</code></pre>
+    <p>
+      A 7-day retention is safe: idempotency dedup happens server-side via the per-event UUID, and
+      the same UUID is never re-enqueued locally (the agent generates a fresh UUID per observation;
+      a failed post is retried as a new event on the next tick).
+    </p>
+  </section>
+
+  <section class="finding">
+    <h2>Finding 2 <span class="badge fix">FIX</span> macOS <code>Updater.download</code> creates a URLSession per call and never invalidates it</h2>
+    <p>
+      <code>client-macos/Sources/RootaikaMac/Updater.swift</code> (line ~70) creates
+      <code>URLSession(configuration:)</code> inside <code>download</code>. A URLSession keeps its
+      internal resources (delegate queue etc.) alive until
+      <code>finishTasksAndInvalidate()</code> / <code>invalidateAndCancel()</code> is called &mdash;
+      this is a documented leak pattern.
+    </p>
+    <p>
+      Normally <code>download</code> runs once and the process restarts after a successful update.
+      But in the broken-release state (download/apply fails &rarr; 30-minute cooldown &rarr; retry)
+      it leaks ~48 sessions/day for as long as the bad <code>desired_version</code> stays configured.
+    </p>
+    <h3>Fix</h3>
+    <pre><code>let session = URLSession(configuration: config)
+defer { session.finishTasksAndInvalidate() }</code></pre>
+    <p class="muted">
+      <code>NetworkBoardClient</code> and <code>DaemonClient</code> sessions are created once per
+      process and are fine as-is.
+    </p>
+  </section>
+
+  <section>
+    <h2>Bounded nits <span class="badge nit">NO ACTION REQUIRED</span></h2>
+    <ul>
+      <li>
+        <strong>macOS log growth (disk, not memory):</strong> <code>MacDebugConsole.log</code>
+        (<code>DebugConsole.swift:47</code>) mirrors every line to stderr even when debug mode is
+        off &mdash; ~3&ndash;4 lines per 5&nbsp;s tick, roughly a gigabyte per year in the launchd
+        log file, which launchd does not rotate.
+      </li>
+      <li>
+        <strong>Windows sound process never <code>Wait()</code>ed:</strong> <code>playLoop</code>
+        (<code>controller_windows.go:373</code>) kills the MP3-loop process but never reaps it; the
+        handle is released only by the GC finalizer. Bounded to one per lock cycle.
+      </li>
+      <li>
+        <strong>Windows warn-cycle context:</strong> the <code>context.WithCancel</code> created in
+        <code>agentapp.go:103</code> is cancelled only at unlock, not when the countdown completes
+        naturally (<code>go vet</code>'s lostcancel would flag it). Bounded to one per lock cycle,
+        does not accumulate.
+      </li>
+    </ul>
+  </section>
+
+  <section class="clean">
+    <h2>Checked and clean</h2>
+    <h3>Windows client</h3>
+    <ul>
+      <li>All loops use <code>time.NewTimer</code> + <code>Stop</code> (no <code>time.After</code> leaks).</li>
+      <li>Per-call <code>api.New</code> shares <code>http.DefaultTransport</code>: connections are pooled and bounded.</li>
+      <li>All response bodies, rows cursors, prepared statements and transactions are closed, including error paths.</li>
+      <li><code>agentrunner</code> and the lock overlay's <code>Wait</code> goroutine reap child processes (no zombies).</li>
+      <li>The loopback HTTP server is shut down via context.</li>
+    </ul>
+    <h3>macOS client</h3>
+    <ul>
+      <li>Lock/warning <code>NSWindow</code>s are torn down on unlock and references released.</li>
+      <li><code>keepOnTopTimer</code> is invalidated and uses <code>[weak self]</code>; key monitor removed; <code>AVAudioPlayer</code> stopped and nil'd; cursor hide/unhide balanced.</li>
+      <li><code>warningTask</code> is cancelled/nil'd on both the unlock and natural-completion paths.</li>
+      <li>Debug console buffers are capped (5,000 backlog lines / 200,000 text-view characters).</li>
+      <li><code>EventBuffer</code> finalizes every prepared statement, including error paths.</li>
+      <li><code>AgentHTTPServer</code> cancels the connection on every terminal path.</li>
+      <li>The daemon's infinite <code>Task.detached</code> loops retain <code>self</code> deliberately (process-lifetime singleton).</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Implementation plan</h2>
+    <table>
+      <tr><th>#</th><th>Change</th><th>Files</th><th>Size</th></tr>
+      <tr>
+        <td>1</td>
+        <td>Purge sent events older than 7 days after each successful <code>MarkSent</code>/<code>markSent</code></td>
+        <td><code>client-windows/internal/buffer/buffer.go</code>, <code>client-macos/Sources/RootaikaMac/EventBuffer.swift</code> (+ one test each)</td>
+        <td>~4 lines each</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><code>defer { session.finishTasksAndInvalidate() }</code> in <code>Updater.download</code></td>
+        <td><code>client-macos/Sources/RootaikaMac/Updater.swift</code></td>
+        <td>1 line</td>
+      </tr>
+    </table>
+    <p class="muted">Total ~10 lines. The log-growth and process-reaping nits are deliberately left as-is.</p>
+  </section>
+</main>
+</body>
+</html>

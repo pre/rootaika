@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import RootaikaMac
 
@@ -60,6 +61,29 @@ final class EventBufferTests: XCTestCase {
         let pending = try buffer.pending(limit: 1)
         XCTAssertNil(pending[0].processName)
         XCTAssertEqual(pending[0].state, .idle)
+    }
+
+    func testMarkSentPurgesOldSentEvents() throws {
+        let buffer = try EventBuffer(path: dbPath)
+        let old = try buffer.enqueue(makeEvent())
+        try buffer.markSent([old.eventID])
+
+        // Backdate the sent stamp past retention via a second connection.
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath.path, &handle), SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        let backdated = RootaikaJSON.rfc3339String(from: Date(timeIntervalSinceNow: -8 * 24 * 3600))
+        XCTAssertEqual(sqlite3_exec(handle, "UPDATE events SET sent_at_utc = '\(backdated)'", nil, nil, nil), SQLITE_OK)
+
+        let fresh = try buffer.enqueue(makeEvent())
+        try buffer.markSent([fresh.eventID])
+
+        var count: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(handle, "SELECT COUNT(*) FROM events", -1, &count, nil), SQLITE_OK)
+        defer { sqlite3_finalize(count) }
+        XCTAssertEqual(sqlite3_step(count), SQLITE_ROW)
+        // Only the freshly sent row remains.
+        XCTAssertEqual(sqlite3_column_int64(count, 0), 1)
     }
 
     func testEnqueueFillsEventIDAndRejectsGarbage() throws {

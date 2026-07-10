@@ -69,6 +69,44 @@ func TestBufferEnqueuePendingAndMarkSent(t *testing.T) {
 	}
 }
 
+func TestMarkSentPurgesOldSentEvents(t *testing.T) {
+	ctx := context.Background()
+	b, err := Open(filepath.Join(t.TempDir(), "events.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer b.Close()
+
+	old, err := b.Enqueue(ctx, model.Event{State: model.StateActive, ProcessName: "steam.exe"})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := b.MarkSent(ctx, []string{old.EventID}); err != nil {
+		t.Fatalf("MarkSent: %v", err)
+	}
+	// Backdate the sent stamp past retention.
+	backdated := formatTime(time.Now().UTC().Add(-sentRetention - time.Hour))
+	if _, err := b.db.ExecContext(ctx, `UPDATE events SET sent_at_utc = ? WHERE event_id = ?`, backdated, old.EventID); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	fresh, err := b.Enqueue(ctx, model.Event{State: model.StateIdle})
+	if err != nil {
+		t.Fatalf("second Enqueue: %v", err)
+	}
+	if err := b.MarkSent(ctx, []string{fresh.EventID}); err != nil {
+		t.Fatalf("second MarkSent: %v", err)
+	}
+
+	var total int
+	if err := b.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&total); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("events after purge = %d, want 1 (only the freshly sent row)", total)
+	}
+}
+
 func TestBufferRejectsInvalidState(t *testing.T) {
 	ctx := context.Background()
 	b, err := Open(filepath.Join(t.TempDir(), "events.db"))

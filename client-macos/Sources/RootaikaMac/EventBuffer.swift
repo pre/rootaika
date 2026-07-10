@@ -22,6 +22,11 @@ final class EventBuffer {
         }
     }
 
+    /// Sent events are kept this long for post-mortem inspection, then
+    /// deleted. Safe to purge: the server dedups by event UUID and sent rows
+    /// are never re-uploaded.
+    private static let sentRetention: TimeInterval = 7 * 24 * 3600
+
     private let db: OpaquePointer
     private let mutex = NSLock()
     // sqlite3_bind_text destructor telling SQLite to copy the buffer.
@@ -169,6 +174,11 @@ final class EventBuffer {
                 bindText(update, 2, id)
                 try step(update)
             }
+            // Purge sent rows past retention so the buffer file doesn't grow forever.
+            let purge = try prepare("DELETE FROM events WHERE sent_at_utc IS NOT NULL AND sent_at_utc < ?")
+            defer { sqlite3_finalize(purge) }
+            bindText(purge, 1, RootaikaJSON.rfc3339String(from: Date(timeIntervalSinceNow: -EventBuffer.sentRetention)))
+            try step(purge)
             try exec("COMMIT")
         } catch {
             try? exec("ROLLBACK")

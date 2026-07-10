@@ -68,6 +68,7 @@ enum Updater {
         config.timeoutIntervalForRequest = 300
         config.timeoutIntervalForResource = 300
         let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
 
         var lastError: Error = UpdateError.status(0)
         for attempt in 1...maxAttempts {

@@ -16,6 +16,11 @@ import (
 	"rootaika/client-windows/internal/model"
 )
 
+// Sent events are kept this long for post-mortem inspection, then deleted.
+// Safe to purge: the server dedups by event UUID and sent rows are never
+// re-uploaded.
+const sentRetention = 7 * 24 * time.Hour
+
 type Buffer struct {
 	db *sql.DB
 }
@@ -132,6 +137,11 @@ func (b *Buffer) MarkSent(ctx context.Context, eventIDs []string) error {
 		if _, err := stmt.ExecContext(ctx, sentAt, id); err != nil {
 			return err
 		}
+	}
+	// Purge sent rows past retention so the buffer file doesn't grow forever.
+	cutoff := formatTime(time.Now().UTC().Add(-sentRetention))
+	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE sent_at_utc IS NOT NULL AND sent_at_utc < ?`, cutoff); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
